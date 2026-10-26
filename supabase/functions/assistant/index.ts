@@ -99,20 +99,23 @@ Deno.serve(async (req) => {
       if (!key) return json({ error: "The assistant isn't set up yet. An admin needs to add an AI API key (see the README)." }, 503);
       const base = (Deno.env.get("AI_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/$/, "");
       const model = Deno.env.get("AI_MODEL") ?? "gemini-flash-latest";
-      const res = await fetch(`${base}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          max_tokens: 1200,
-          messages: [
-            { role: "system", content: `${RULES}\n\nSITE GUIDE:${SITE_GUIDE}` },
-            { role: "system", content: `PASSAGES:\n\n${passages || "(no matching passages found)"}` },
-            ...messages,
-          ],
-        }),
-      });
+      const chatMessages = [
+        { role: "system", content: `${RULES}\n\nSITE GUIDE:${SITE_GUIDE}` },
+        { role: "system", content: `PASSAGES:\n\n${passages || "(no matching passages found)"}` },
+        ...messages,
+      ];
+      const call = (params: Record<string, unknown>) =>
+        fetch(`${base}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model, messages: chatMessages, ...params }),
+        });
+      let res = await call({ temperature: 0.2, max_tokens: 1200 });
+      // Newer OpenAI models reject temperature and max_tokens; retry once with the parameters they accept
+      if (res.status === 400) {
+        const body = await res.clone().text();
+        if (/max_tokens|temperature|unsupported/i.test(body)) res = await call({ max_completion_tokens: 2000 });
+      }
       if (!res.ok) {
         const detail = await res.text();
         console.error("AI provider error", res.status, detail.slice(0, 500));
