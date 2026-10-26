@@ -125,8 +125,15 @@ Deno.serve(async (req) => {
         // Pass the provider's own message through (it never contains the key) so setup problems are diagnosable
         let reason = "";
         try {
-          const parsed = JSON.parse(detail);
-          reason = (Array.isArray(parsed) ? parsed[0] : parsed)?.error?.message ?? "";
+          const err = (() => {
+            const parsed = JSON.parse(detail);
+            return (Array.isArray(parsed) ? parsed[0] : parsed)?.error ?? {};
+          })();
+          // OpenRouter puts the upstream provider's own message in metadata.raw
+          const raw = typeof err.metadata?.raw === "string" ? err.metadata.raw : err.metadata?.raw ? JSON.stringify(err.metadata.raw) : "";
+          reason = [err.message, err.metadata?.provider_name && `provider: ${err.metadata.provider_name}`, raw.slice(0, 300)]
+            .filter(Boolean)
+            .join(" — ");
         } catch {
           reason = detail.slice(0, 200);
         }
