@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { AiUsage } from '../components/AiUsage'
 import { DEFAULT_ASSOCIATION, useAssociation, useAuth, useProfile, type Association } from '../lib/auth'
 import { fmtDate } from '../lib/format'
 import { downloadBytes, letterPdf, mergePdfs } from '../lib/pdf'
@@ -209,6 +210,8 @@ export default function Admin() {
         </div>
         <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 0 }}>When a unit sells, pause the old owner's accounts and generate a new code for the unit.</p>
       </div>
+
+      <AiUsage members={members} />
 
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Where letters go</h2>

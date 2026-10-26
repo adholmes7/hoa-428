@@ -70,7 +70,10 @@ export default function RequestNew() {
   const defs = LETTER_FIELDS[type] ?? []
 
   useEffect(() => {
-    if (t) setMethod(t.recommendedMethod)
+    if (t) {
+      setMethod(t.recommendedMethod)
+      setVisibility(t.defaultPrivate ? 'private' : 'owners')
+    }
   }, [t])
 
   useEffect(() => {

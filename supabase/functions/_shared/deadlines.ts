@@ -29,6 +29,8 @@ export interface RequestType {
   /** Recommended delivery method */
   recommendedMethod: Method;
   verify?: boolean;
+  /** Start the request as private to the unit (e.g. replies with other owners' personal details) */
+  defaultPrivate?: boolean;
 }
 
 export const REQUEST_TYPES: RequestType[] = [
@@ -70,6 +72,23 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: "statutory",
     ifMissed: "Treated as a records request: small claims action under Civ. Code §5235.",
     recommendedMethod: "certified_rr",
+  },
+  {
+    id: "membership_list",
+    label: "Membership list (owners' names, addresses, emails)",
+    short: "Membership list",
+    description:
+      "The list of members with names, property and mailing addresses, and email addresses, for contacting other owners about association matters. Members who opted out are left off.",
+    legalBasis: "Civ. Code §§5200(a)(9), 5210(b)(6), 5220; Corp. Code §§8330, 8338",
+    dayType: "business",
+    days: 10,
+    deadlineKind: "statutory",
+    ifMissed:
+      "Within 10 business days the HOA must either provide the list or offer, in writing, another way to reach your purpose (for example, mailing your message for you). If it does neither, you can sue in small claims court to enforce records rights (Civ. Code §5235) or seek a court order (Corp. Code §8336).",
+    deliveryNote:
+      "The request must be in writing and state your purpose, which must relate to your interests as a member (Corp. Code §8330). The list may only be used for that kind of purpose: no selling it and no commercial use (Corp. Code §8338).",
+    recommendedMethod: "certified_rr",
+    defaultPrivate: true,
   },
   {
     id: "insurance_review",

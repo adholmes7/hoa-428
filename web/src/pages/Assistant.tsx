@@ -38,8 +38,16 @@ export default function Assistant() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [remaining, setRemaining] = useState<number | null>(null)
+  const [limit, setLimit] = useState<number | null>(null)
   const end = useRef<HTMLDivElement>(null)
   const asked = useRef(false)
+
+  useEffect(() => {
+    supabase.functions.invoke('assistant', { body: { status: true } }).then(({ data }) => {
+      if (typeof data?.limit === 'number') setLimit(data.limit)
+      if (typeof data?.remaining === 'number') setRemaining(data.remaining)
+    })
+  }, [])
 
   useEffect(() => {
     try {
@@ -65,10 +73,12 @@ export default function Assistant() {
       if (error) {
         const ctx = (error as { context?: Response }).context
         const detail = ctx && typeof ctx.json === 'function' ? await ctx.json().catch(() => null) : null
+        if (typeof detail?.remaining === 'number') setRemaining(detail.remaining)
         throw new Error(detail?.error ?? error.message)
       }
       setTurns([...next, { role: 'assistant', content: data.answer, sources: data.sources, suggest: data.suggest }])
       if (typeof data.remaining === 'number') setRemaining(data.remaining)
+      if (typeof data.limit === 'number') setLimit(data.limit)
     } catch (e) {
       setError(errMsg(e))
       setTurns(next)
@@ -94,6 +104,12 @@ export default function Assistant() {
             Ask about the CC&Rs, the HOA's documents, or how to use this site. It answers from the documents and cites sections, and can
             start the right request for you. It's an AI: check what it cites, and it isn't legal advice.
           </p>
+          {limit != null && (
+            <p className="muted" style={{ fontSize: '0.85rem', marginTop: 6 }}>
+              Each owner can ask up to {limit} questions a day; the count resets at midnight Pacific time.
+              {remaining != null && <> You have <b>{remaining}</b> left today.</>}
+            </p>
+          )}
         </div>
         {turns.length > 0 && (
           <button className="btn ghost" onClick={() => setTurns([])}>
@@ -175,7 +191,7 @@ export default function Assistant() {
           <Icon name="send" /> Ask
         </button>
       </form>
-      {remaining != null && <p className="muted" style={{ fontSize: '0.8rem' }}>{remaining} questions left today.</p>}
+
     </>
   )
 }

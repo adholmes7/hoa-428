@@ -460,6 +460,13 @@ export default function RequestDetail() {
             )}
           </div>
 
+          {r.type === 'membership_list' && (
+            <div className="notice warn">
+              <b>Keep the list private.</b> When the HOA sends it, attach it here with this request set to private, not in the shared
+              Document library. Use it only to contact owners about association matters (Corp. Code §8338).
+            </div>
+          )}
+
           <Attachments requestId={r.id} canUpload={canEdit} />
         </div>
 

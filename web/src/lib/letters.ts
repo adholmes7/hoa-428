@@ -42,6 +42,17 @@ export const LETTER_FIELDS: Record<string, FieldDef[]> = {
   minutes: [
     { key: 'meetings', label: 'Which meetings', kind: 'textarea', placeholder: 'e.g. All open board meetings from January 2025 to present', required: true },
   ],
+  membership_list: [
+    {
+      key: 'purpose',
+      label: 'Purpose of the request',
+      kind: 'textarea',
+      required: true,
+      hint: 'Required by law, and it must relate to your interests as a member. Be specific.',
+      placeholder: 'e.g. To contact fellow owners about recurring water leaks, building maintenance, and the upcoming Board election.',
+    },
+    { key: 'details', label: 'Anything else (optional)', kind: 'textarea' },
+  ],
   insurance_review: [
     { key: 'policies', label: 'Policies to review', kind: 'textarea', required: true, placeholder: 'e.g. State Farm policy 92-C0-4666-9, all forms and endorsements; earthquake and umbrella policies' },
   ],
@@ -130,6 +141,8 @@ export function letterSubject(type: string, f: Record<string, unknown>): string 
     case 'records_current':
     case 'records_prior':
       return 'Request to Inspect and Copy Association Records (Civil Code §5200 et seq.)'
+    case 'membership_list':
+      return 'Request for Membership List (Civil Code §5200(a)(9); Corporations Code §8330)'
     case 'minutes':
       return 'Request for Board Meeting Minutes (Civil Code §§4950, 5210)'
     case 'insurance_review':
@@ -182,6 +195,22 @@ function bodyParagraphs(type: string, f: Record<string, unknown>, ctx: LetterCon
       )
       break
     }
+    case 'membership_list':
+      p.push(
+        `As an owner and member of the Association (Unit ${ctx.unit}), I request a copy of the Association's membership list under Civil Code Sections 5200(a)(9) and 5210(b)(6) and Corporations Code Section 8330. The list should include each member's name, property address, mailing address, and email address, as collected by the Association, excluding any member who has opted out under Civil Code Section 5220.`,
+      )
+      p.push(`Purpose of this request:\n${str(f, 'purpose')}`)
+      if (str(f, 'details')) p.push(str(f, 'details'))
+      p.push(
+        'This purpose is reasonably related to my interests as a member. I will use the list only for that purpose and in accordance with Corporations Code Section 8338: I will not sell it or use it for any commercial purpose.',
+      )
+      p.push(
+        'Please provide the list electronically, by email, as a spreadsheet or PDF. If a reasonable charge applies, please tell me the amount in advance.',
+      )
+      p.push(
+        'Under Corporations Code Section 8330 and Civil Code Section 5210(b)(6), the list must be made available within ten (10) business days of the Association\'s receipt of this request. If the Association instead proposes an alternative method of achieving this purpose, please send that proposal to me in writing within the same ten (10) business days.',
+      )
+      break
     case 'minutes':
       p.push(
         `As an owner and member of the Association (Unit ${ctx.unit}), I request copies of the minutes, draft minutes, or minute summaries of the following meetings under Civil Code Sections 4950 and 5210(b)(4):`,

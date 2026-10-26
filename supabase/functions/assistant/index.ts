@@ -49,7 +49,9 @@ function extractSuggest(text: string) {
   return { answer: text.replace(m[0], "").trim(), suggest };
 }
 
-async function askClaude(messages: Msg[], passages: string): Promise<{ text: string } | { error: string }> {
+type Tokens = { input: number; output: number; cacheRead: number; cacheWrite: number };
+
+async function askClaude(messages: Msg[], passages: string): Promise<{ text: string; tokens: Tokens } | { error: string }> {
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return { error: "The assistant isn't set up yet. An admin needs to add the Anthropic API key (see the README)." };
   const client = new Anthropic({ apiKey, timeout: 45_000, maxRetries: 1 });
@@ -77,7 +79,14 @@ async function askClaude(messages: Msg[], passages: string): Promise<{ text: str
       .map((b) => b.text)
       .join("\n")
       .trim();
-    return text ? { text } : { error: "The assistant returned an empty answer. Please try again." };
+    const u = response.usage;
+    const tokens = {
+      input: u.input_tokens ?? 0,
+      output: u.output_tokens ?? 0,
+      cacheRead: u.cache_read_input_tokens ?? 0,
+      cacheWrite: u.cache_creation_input_tokens ?? 0,
+    };
+    return text ? { text, tokens } : { error: "The assistant returned an empty answer. Please try again." };
   } catch (error) {
     console.error("Claude API error", error);
     if (error instanceof Anthropic.AuthenticationError) return { error: "The Anthropic API key was rejected. An admin needs to check it." };
@@ -99,16 +108,20 @@ Deno.serve(async (req) => {
       .filter((m: Msg) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       .slice(-10)
       .map((m: Msg) => ({ role: m.role, content: m.content.slice(0, 4000) }));
-    const question = [...messages].reverse().find((m) => m.role === "user")?.content;
-    if (!question) return json({ error: "Ask a question" }, 400);
-
-    // Daily limit per owner (protects the free API quota)
+    // Daily limit per owner (keeps API spend predictable)
     const limit = Number(Deno.env.get("AI_DAILY_LIMIT") ?? 40);
     const admin = adminClient();
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
     const { data: usage } = await admin.from("ai_usage").select("count").eq("user_id", user.id).eq("day", today).maybeSingle();
     const used = usage?.count ?? 0;
-    if (used >= limit) return json({ error: `You've reached today's limit of ${limit} questions. It resets at midnight.` }, 429);
+    // { status: true } lets the page show the cap before the first question
+    if (body.status) return json({ limit, remaining: Math.max(0, limit - used) });
+
+    const question = [...messages].reverse().find((m) => m.role === "user")?.content;
+    if (!question) return json({ error: "Ask a question" }, 400);
+    if (used >= limit) {
+      return json({ error: `You've used all ${limit} of today's questions. The limit resets at midnight (Pacific time).`, remaining: 0, limit }, 429);
+    }
 
     // Retrieval: keyword search over CC&Rs and documents, plus any sections cited by number
     const prevUser = messages.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join(" ");
@@ -131,6 +144,7 @@ Deno.serve(async (req) => {
     const sources = ctx.map(({ kind, ref, title, page }) => ({ kind, ref, title, page }));
 
     let text: string;
+    let tokens: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     if (Deno.env.get("AI_PROVIDER") === "mock") {
       text = `(Test mode: no AI key configured.) I found ${ctx.length} relevant passages: ${
         ctx.map((c) => (c.kind === "ccr" ? `§${c.ref}` : c.title)).join(", ")
@@ -139,6 +153,7 @@ Deno.serve(async (req) => {
       const result = await askClaude(messages, passages);
       if ("error" in result) return json({ error: result.error }, 502);
       text = result.text;
+      tokens = result.tokens;
     } else {
       const key = Deno.env.get("AI_API_KEY");
       if (!key) return json({ error: "The assistant isn't set up yet. An admin needs to add an AI API key (see the README)." }, 503);
@@ -198,6 +213,7 @@ Deno.serve(async (req) => {
           try {
             const out = await res.json();
             text = out.choices?.[0]?.message?.content ?? "";
+            tokens = { input: out.usage?.prompt_tokens ?? 0, output: out.usage?.completion_tokens ?? 0, cacheRead: 0, cacheWrite: 0 };
           } catch {
             failures.push({ model, status: 0, reason: "timed out while reading the reply" });
             continue;
@@ -224,9 +240,24 @@ Deno.serve(async (req) => {
       }
     }
 
-    await admin.from("ai_usage").upsert({ user_id: user.id, day: today, count: used + 1 });
+    // Add this question's tokens to today's totals (counts only; question text is never stored)
+    const { data: prev } = await admin
+      .from("ai_usage")
+      .select("input_tokens, output_tokens, cache_read_tokens, cache_write_tokens")
+      .eq("user_id", user.id)
+      .eq("day", today)
+      .maybeSingle();
+    await admin.from("ai_usage").upsert({
+      user_id: user.id,
+      day: today,
+      count: used + 1,
+      input_tokens: (prev?.input_tokens ?? 0) + tokens.input,
+      output_tokens: (prev?.output_tokens ?? 0) + tokens.output,
+      cache_read_tokens: (prev?.cache_read_tokens ?? 0) + tokens.cacheRead,
+      cache_write_tokens: (prev?.cache_write_tokens ?? 0) + tokens.cacheWrite,
+    });
     const { answer, suggest } = extractSuggest(text);
-    return json({ answer, suggest, sources: sources.slice(0, 8), remaining: limit - used - 1 });
+    return json({ answer, suggest, sources: sources.slice(0, 8), remaining: limit - used - 1, limit });
   } catch (e) {
     console.error(e);
     return json({ error: "Something went wrong" }, 500);
