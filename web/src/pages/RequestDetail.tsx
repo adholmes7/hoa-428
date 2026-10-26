@@ -567,7 +567,8 @@ export default function RequestDetail() {
             </div>
           )}
 
-          <Attachments requestId={r.id} canUpload={canEdit} />
+          {/* Remount after sending so the "as mailed" PDF the server attached shows up */}
+          <Attachments key={`${r.id}-${r.status}`} requestId={r.id} canUpload={canEdit} />
         </div>
 
         <div className="stack">
