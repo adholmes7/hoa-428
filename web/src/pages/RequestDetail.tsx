@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { composeLetterCopy } from '@shared/letter-copy.ts'
 import { computeDeadline, MAIL_TIERS, METHODS, requestType, todayISO, urgency, type MailTier, type Method } from '@shared/deadlines.ts'
 import { Attachments } from '../components/Attachments'
 import { Icon } from '../components/Icon'
+import { LetterPreview } from '../components/LetterPreview'
+import { EmailCopyOption, EmailPreview, MailReview, type MailStatus } from '../components/MailReview'
 import { StatusBadge } from '../components/RequestBits'
 import { SignatureSettings, useSignature } from '../components/Signature'
 import { useAssociation, useProfile } from '../lib/auth'
@@ -12,14 +15,6 @@ import { bytesToBase64, downloadBytes, letterPdf } from '../lib/pdf'
 import { errMsg, supabase, type RequestEvent, type RequestRow } from '../lib/supabase'
 
 type Panel = null | 'sent' | 'received' | 'answered' | 'deemed' | 'note' | 'mail'
-type MailStatus = {
-  enabled: boolean
-  test: boolean
-  limit: number
-  used: number
-  price_note: string
-  email?: { enabled: boolean; hoa: string[]; owner: string | null }
-}
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Draft created',
@@ -60,6 +55,7 @@ export default function RequestDetail() {
   const [tier, setTier] = useState<MailTier>('certified')
   const sig = useSignature()
   const [copyByEmail, setCopyByEmail] = useState(true)
+  const [reviewing, setReviewing] = useState(false)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('requests').select('*').eq('id', id).maybeSingle()
@@ -183,6 +179,7 @@ export default function RequestDetail() {
         throw new Error(detail?.error ?? error.message)
       }
       if (data?.error) throw new Error(data.error)
+      setReviewing(false)
       setPanel(null)
       setMail((m) => (m ? { ...m, used: m.used + 1 } : m))
       await load()
@@ -408,6 +405,23 @@ export default function RequestDetail() {
                     })()}
                   </p>
                   {emailOn && <EmailCopyOption on={copyByEmail} set={setCopyByEmail} mail={mail!} test={false} />}
+                  {emailOn && copyByEmail && (
+                    <details className="email-details">
+                      <summary>Preview the email</summary>
+                      <EmailPreview
+                        from={mail!.email?.from ?? null}
+                        copy={composeLetterCopy({
+                          refNo: r.ref_no,
+                          subject: r.title,
+                          ownerName: profile.display_name,
+                          ownerEmail: mail!.email?.owner ?? null,
+                          hoa: mail!.email?.hoa ?? [],
+                          howSent: `${METHODS[method].label} on ${date}${tracking.trim() ? ` (tracking ${tracking.trim()})` : ''}`,
+                          test: false,
+                        })}
+                      />
+                    </details>
+                  )}
                   <div className="row">
                     <button className="btn primary" disabled={busy} onClick={markSent}>Save</button>
                     <button className="btn ghost" onClick={() => setPanel(null)}>Cancel</button>
@@ -467,20 +481,33 @@ export default function RequestDetail() {
                   </p>
                   {emailOn && <EmailCopyOption on={copyByEmail} set={setCopyByEmail} mail={mail!} test={mail!.test} />}
                   <div className="row">
-                    <button
-                      className="btn primary"
-                      style={{ whiteSpace: 'normal', textAlign: 'center', height: 'auto' }}
-                      disabled={busy || mailLeft === 0}
-                      onClick={() => {
-                        const m = MAIL_TIERS[tier]
-                        if (mail?.test || confirm(`Mail this letter for real by ${m.label}? About $${m.price.toFixed(2)} will be charged.`)) sendViaService()
-                      }}
-                    >
-                      {busy ? 'Sending…' : `Send by ${MAIL_TIERS[tier].label} (~$${MAIL_TIERS[tier].price.toFixed(2)})`}
+                    <button className="btn primary" disabled={busy || mailLeft === 0} onClick={() => { setError(''); setReviewing(true) }}>
+                      Review before sending <Icon name="send" />
                     </button>
                     <button className="btn ghost" onClick={() => setPanel(null)}>Cancel</button>
                   </div>
                 </div>
+              )}
+
+              {panel === 'mail' && reviewing && mail && (
+                <MailReview
+                  refNo={r.ref_no}
+                  title={r.title}
+                  letter={r.letter_body ?? ''}
+                  signature={signature}
+                  tier={tier}
+                  returnAddress={returnAddress}
+                  association={association}
+                  ownerName={profile.display_name}
+                  unit={profile.unit_id}
+                  mail={mail}
+                  emailCopy={emailOn && copyByEmail}
+                  busy={busy}
+                  error={error}
+                  onBack={() => setReviewing(false)}
+                  onSend={sendViaService}
+                  onDownload={downloadPdf}
+                />
               )}
 
               {panel === 'received' && (
@@ -620,49 +647,5 @@ export default function RequestDetail() {
         </div>
       </div>
     </>
-  )
-}
-
-/** The letter as text, with the saved signature drawn on the signature line (same placement as the PDF). */
-function LetterPreview({ text, signature }: { text: string; signature: string | null }) {
-  const body = text.replace(/\f/g, '\n— — — — —\n')
-  const lines = body.split('\n')
-  const close = lines.findIndex((l) => l.trim() === 'Sincerely,')
-  const at = signature && close >= 0 ? lines.findIndex((l, i) => i > close && /^_{10,}$/.test(l.trim())) : -1
-  if (at < 0) return <div className="letter mt">{body}</div>
-  return (
-    <div className="letter mt">
-      {lines.slice(0, at).join('\n')}
-      {'\n'}
-      <span className="letter-sig">
-        <img src={signature!} alt="Your signature" />
-        {lines[at]}
-      </span>
-      {'\n'}
-      {lines.slice(at + 1).join('\n')}
-    </div>
-  )
-}
-
-/** Opt-out checkbox for emailing a copy of the letter to the HOA and the owner. */
-function EmailCopyOption({ on, set, mail, test }: { on: boolean; set: (v: boolean) => void; mail: MailStatus; test: boolean }) {
-  const hoa = mail.email?.hoa ?? []
-  const me = mail.email?.owner
-  return (
-    <label className="check">
-      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
-      <span>
-        <b>Email a copy</b> of the letter (PDF) {test ? 'to you only' : hoa.length ? `to the HOA (${hoa.join(', ')})` : 'to you'}
-        {!test && hoa.length > 0 && me ? `, copying you (${me})` : test && me ? ` (${me})` : ''}.
-        <br />
-        <span className="muted" style={{ fontSize: '0.85rem' }}>
-          {test
-            ? "Test mode: the board isn't emailed about letters that aren't really mailed."
-            : hoa.length
-              ? 'For reference only; the mailed letter is the formal delivery.'
-              : 'No HOA email is set in Admin settings, so only you get a copy.'}
-        </span>
-      </span>
-    </label>
   )
 }

@@ -23,5 +23,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "../supabase/functions/_shared/deadlines.ts"]
+  "include": ["src", "../supabase/functions/_shared/deadlines.ts", "../supabase/functions/_shared/letter-copy.ts"]
 }

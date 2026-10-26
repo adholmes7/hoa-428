@@ -13,7 +13,8 @@
 //   service: "first_class" | "certified" | "certified_rr"
 
 import { addCalendarDays, computeDeadline, requestType, todayISO } from "../_shared/deadlines.ts";
-import { emailEnabled, hoaRecipients, sendLetterCopy } from "../_shared/email.ts";
+import { emailEnabled, hoaRecipients, mailFrom, sendLetterCopy } from "../_shared/email.ts";
+import { envelopeTo, howSentText } from "../_shared/letter-copy.ts";
 import { adminClient, cors, json, requireOwner } from "../_shared/http.ts";
 
 type Addr = {
@@ -99,7 +100,7 @@ Deno.serve(async (req) => {
       const { data: setting } = await sb.from("site_settings").select("value").eq("key", "mail_service").maybeSingle();
       const { data: assoc } = await sb.from("site_settings").select("value").eq("key", "association").maybeSingle();
       return json({
-        email: { enabled: emailEnabled(), hoa: hoaRecipients(assoc?.value ?? {}), owner: profile.contact_email || user.email || null },
+        email: { enabled: emailEnabled(), from: mailFrom(), hoa: hoaRecipients(assoc?.value ?? {}), owner: profile.contact_email || user.email || null },
         enabled: Boolean(key),
         test: Boolean(key?.startsWith("test_")),
         limit,
@@ -133,14 +134,15 @@ Deno.serve(async (req) => {
       city_state_zip: "Sherman Oaks, CA 91423",
       ...(setting?.value ?? {}),
     };
-    const to = parseAddress(`Board of Directors\n${a.street}\n${a.city_state_zip}`, "Board of Directors");
+    const env = envelopeTo(a);
+    const to = parseAddress(`${env.name}\n${env.street}\n${env.cityStateZip}`, env.name);
     const from = parseAddress(
       return_address?.trim() || `${profile.display_name}\n428 Hill Street, Unit ${profile.unit_id}\nSanta Monica, CA 90405`,
       profile.display_name,
     );
     if (!to) return json({ error: "The association address in Admin settings couldn't be read" }, 400);
     if (!from) return json({ error: 'Return address must end with a line like "Santa Monica, CA 90405"' }, 400);
-    to.company = `${a.name} ${a.care_of}`.slice(0, 40);
+    to.company = env.company;
 
     const pdf = Uint8Array.from(atob(pdf_base64), (c) => c.charCodeAt(0));
     if (pdf.length > 5_000_000) return json({ error: "Letter PDF is too large" }, 400);
@@ -244,7 +246,7 @@ Deno.serve(async (req) => {
         ownerEmail: profile.contact_email || user.email || null,
         hoa: hoaRecipients(setting?.value ?? {}),
         pdf,
-        howSent: `${service.label} via USPS, mailing ${sentDate}${out.tracking_number ? ` (tracking ${out.tracking_number})` : ""}`,
+        howSent: howSentText(service.label, sentDate, out.tracking_number),
         test,
         actorId: user.id,
       });
