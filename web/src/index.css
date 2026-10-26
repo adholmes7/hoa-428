@@ -438,7 +438,7 @@ a.item:hover { background: var(--surface-2); border-radius: 8px; }
 .ai-msg { scroll-margin-top: 16px; }
 .ai-end { scroll-margin-bottom: 110px; }
 @media (max-width: 860px) {
-  .ai-compose { bottom: calc(58px + env(safe-area-inset-bottom)); margin-bottom: calc(-84px - env(safe-area-inset-bottom)); padding-bottom: 12px; }
+  .ai-compose { bottom: calc(58px + env(safe-area-inset-bottom)); margin-bottom: -26px; padding-bottom: 12px; }
   .ai-msg { scroll-margin-top: 72px; }
   .ai-end { scroll-margin-bottom: 180px; }
 }
