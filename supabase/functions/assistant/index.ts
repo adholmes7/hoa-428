@@ -105,11 +105,14 @@ Deno.serve(async (req) => {
         { role: "system", content: `PASSAGES:\n\n${passages || "(no matching passages found)"}` },
         ...messages,
       ];
+      // Free models can stall; give each attempt 20s and the whole search 60s so the page never hangs
+      const deadline = Date.now() + 60_000;
       const call = (model: string, params: Record<string, unknown>) =>
         fetch(`${base}/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
           body: JSON.stringify({ model, messages: chatMessages, ...params }),
+          signal: AbortSignal.timeout(Math.max(1_000, Math.min(20_000, deadline - Date.now()))),
         });
       // The provider's own explanation (never contains the key), so setup problems are diagnosable
       const reasonOf = (detail: string) => {
@@ -129,26 +132,42 @@ Deno.serve(async (req) => {
       const failures: { model: string; status: number; reason: string }[] = [];
       text = "";
       for (const model of models) {
-        let res = await call(model, { temperature: 0.2, max_tokens: 1200 });
-        // Newer OpenAI models reject temperature and max_tokens; retry once with the parameters they accept
-        if (res.status === 400) {
-          const body = await res.clone().text();
-          if (/max_tokens|temperature|unsupported/i.test(body)) res = await call(model, { max_completion_tokens: 2000 });
+        if (Date.now() > deadline - 2_000) {
+          failures.push({ model, status: 0, reason: "skipped: out of time" });
+          continue;
+        }
+        let res: Response;
+        try {
+          res = await call(model, { temperature: 0.2, max_tokens: 1200 });
+          // Newer OpenAI models reject temperature and max_tokens; retry once with the parameters they accept
+          if (res.status === 400) {
+            const body = await res.clone().text();
+            if (/max_tokens|temperature|unsupported/i.test(body)) res = await call(model, { max_completion_tokens: 2000 });
+          }
+        } catch (e) {
+          const timedOut = e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
+          failures.push({ model, status: 0, reason: timedOut ? "timed out" : `network error: ${(e as Error).message}` });
+          continue;
         }
         if (res.ok) {
-          const out = await res.json();
-          text = out.choices?.[0]?.message?.content ?? "";
+          try {
+            const out = await res.json();
+            text = out.choices?.[0]?.message?.content ?? "";
+          } catch {
+            failures.push({ model, status: 0, reason: "timed out while reading the reply" });
+            continue;
+          }
           if (text) break;
           failures.push({ model, status: 200, reason: "empty reply" });
           continue;
         }
-        const detail = await res.text();
+        const detail = await res.text().catch(() => "");
         console.error("AI provider error", model, res.status, detail.slice(0, 500));
         failures.push({ model, status: res.status, reason: reasonOf(detail) });
       }
       if (!text) {
         const details = failures.map((f) => `${f.model} (${f.status}): ${f.reason || "no details"}`).join(" | ");
-        const busy = failures.every((f) => f.status === 429);
+        const busy = failures.every((f) => f.status === 429 || f.status === 0);
         return json(
           {
             error: busy
