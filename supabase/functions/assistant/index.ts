@@ -98,52 +98,66 @@ Deno.serve(async (req) => {
       const key = Deno.env.get("AI_API_KEY");
       if (!key) return json({ error: "The assistant isn't set up yet. An admin needs to add an AI API key (see the README)." }, 503);
       const base = (Deno.env.get("AI_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/$/, "");
-      // AI_MODEL may list fallbacks, comma-separated; OpenRouter tries them in order if one is unavailable
+      // AI_MODEL may list fallback models, comma-separated; each is tried in turn until one answers
       const models = (Deno.env.get("AI_MODEL") ?? "gemini-flash-latest").split(",").map((m) => m.trim()).filter(Boolean);
-      const model = models[0];
-      const fallbacks = base.includes("openrouter.ai") && models.length > 1 ? { models } : {};
       const chatMessages = [
         { role: "system", content: `${RULES}\n\nSITE GUIDE:${SITE_GUIDE}` },
         { role: "system", content: `PASSAGES:\n\n${passages || "(no matching passages found)"}` },
         ...messages,
       ];
-      const call = (params: Record<string, unknown>) =>
+      const call = (model: string, params: Record<string, unknown>) =>
         fetch(`${base}/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ model, messages: chatMessages, ...fallbacks, ...params }),
+          body: JSON.stringify({ model, messages: chatMessages, ...params }),
         });
-      let res = await call({ temperature: 0.2, max_tokens: 1200 });
-      // Newer OpenAI models reject temperature and max_tokens; retry once with the parameters they accept
-      if (res.status === 400) {
-        const body = await res.clone().text();
-        if (/max_tokens|temperature|unsupported/i.test(body)) res = await call({ max_completion_tokens: 2000 });
-      }
-      if (!res.ok) {
-        const detail = await res.text();
-        console.error("AI provider error", res.status, detail.slice(0, 500));
-        // Pass the provider's own message through (it never contains the key) so setup problems are diagnosable
-        let reason = "";
+      // The provider's own explanation (never contains the key), so setup problems are diagnosable
+      const reasonOf = (detail: string) => {
         try {
-          const err = (() => {
-            const parsed = JSON.parse(detail);
-            return (Array.isArray(parsed) ? parsed[0] : parsed)?.error ?? {};
-          })();
-          // OpenRouter puts the upstream provider's own message in metadata.raw
+          const parsed = JSON.parse(detail);
+          const err = (Array.isArray(parsed) ? parsed[0] : parsed)?.error ?? {};
+          // OpenRouter puts the upstream provider's message in metadata.raw
           const raw = typeof err.metadata?.raw === "string" ? err.metadata.raw : err.metadata?.raw ? JSON.stringify(err.metadata.raw) : "";
-          reason = [err.message, err.metadata?.provider_name && `provider: ${err.metadata.provider_name}`, raw.slice(0, 300)]
+          return [err.message, err.metadata?.provider_name && `provider: ${err.metadata.provider_name}`, raw.slice(0, 200)]
             .filter(Boolean)
             .join(" — ");
         } catch {
-          reason = detail.slice(0, 200);
+          return detail.slice(0, 200);
         }
-        if (res.status === 429) {
-          return json({ error: `The AI service is busy or its free allowance is used up (shared by all owners). Try again later.${reason ? ` Details: ${reason}` : ""}` }, 502);
+      };
+
+      const failures: { model: string; status: number; reason: string }[] = [];
+      text = "";
+      for (const model of models) {
+        let res = await call(model, { temperature: 0.2, max_tokens: 1200 });
+        // Newer OpenAI models reject temperature and max_tokens; retry once with the parameters they accept
+        if (res.status === 400) {
+          const body = await res.clone().text();
+          if (/max_tokens|temperature|unsupported/i.test(body)) res = await call(model, { max_completion_tokens: 2000 });
         }
-        return json({ error: `The AI service returned an error (${res.status} from ${model})${reason ? `: ${reason}` : "."}` }, 502);
+        if (res.ok) {
+          const out = await res.json();
+          text = out.choices?.[0]?.message?.content ?? "";
+          if (text) break;
+          failures.push({ model, status: 200, reason: "empty reply" });
+          continue;
+        }
+        const detail = await res.text();
+        console.error("AI provider error", model, res.status, detail.slice(0, 500));
+        failures.push({ model, status: res.status, reason: reasonOf(detail) });
       }
-      const out = await res.json();
-      text = out.choices?.[0]?.message?.content ?? "";
+      if (!text) {
+        const details = failures.map((f) => `${f.model} (${f.status}): ${f.reason || "no details"}`).join(" | ");
+        const busy = failures.every((f) => f.status === 429);
+        return json(
+          {
+            error: busy
+              ? `The AI service is busy or its free allowance is used up (shared by all owners). Try again later. Details: ${details}`
+              : `The AI service returned an error. Details: ${details}`,
+          },
+          502,
+        );
+      }
     }
 
     await admin.from("ai_usage").upsert({ user_id: user.id, day: today, count: used + 1 });
