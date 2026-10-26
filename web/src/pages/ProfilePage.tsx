@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HouseholdInvite } from '../components/HouseholdInvite'
 import { useAuth, useProfile } from '../lib/auth'
 import { errMsg, supabase } from '../lib/supabase'
 
@@ -70,6 +71,8 @@ export default function ProfilePage() {
           <h3 style={{ margin: 0 }}>Password</h3>
           <input type="password" minLength={10} autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password (10+ characters)" />
           <div><button className="btn" disabled={pw.length < 10} onClick={changePw}>Change password</button></div>
+          <hr />
+          <HouseholdInvite />
           <hr />
           <h3 style={{ margin: 0 }}>Install on your phone</h3>
           <p className="ink2" style={{ margin: 0, fontSize: '0.92rem' }}>

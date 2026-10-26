@@ -5,7 +5,7 @@ import { downloadBytes, letterPdf, mergePdfs } from '../lib/pdf'
 import { errMsg, supabase, type Profile } from '../lib/supabase'
 
 type Unit = { id: number; label: string; bedrooms: number | null }
-type Invite = { id: number; unit_id: number; uses: number; max_uses: number; revoked: boolean; created_at: string }
+type Invite = { id: number; unit_id: number; uses: number; max_uses: number; revoked: boolean; created_at: string; kind: string }
 
 function inviteLetter(unit: Unit, code: string, siteUrl: string, from: string) {
   return [
@@ -67,7 +67,7 @@ export default function Admin() {
   const load = useCallback(async () => {
     const [{ data: u }, { data: i }, { data: m }] = await Promise.all([
       supabase.from('units').select('*').order('id'),
-      supabase.from('unit_invites').select('id, unit_id, uses, max_uses, revoked, created_at').order('created_at', { ascending: false }),
+      supabase.from('unit_invites').select('id, unit_id, uses, max_uses, revoked, created_at, kind').order('created_at', { ascending: false }),
       supabase.from('profiles').select('*').order('unit_id'),
     ])
     setUnits((u as Unit[]) ?? [])
@@ -78,7 +78,7 @@ export default function Admin() {
     load()
   }, [load])
 
-  const activeInvite = (unit: number) => invites.find((i) => i.unit_id === unit && !i.revoked)
+  const activeInvite = (unit: number) => invites.find((i) => i.unit_id === unit && !i.revoked && i.kind === 'admin')
 
   async function generate() {
     if (!selected.length) return
