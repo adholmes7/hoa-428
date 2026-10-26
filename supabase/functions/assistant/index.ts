@@ -122,9 +122,6 @@ Deno.serve(async (req) => {
       if (!res.ok) {
         const detail = await res.text();
         console.error("AI provider error", res.status, detail.slice(0, 500));
-        if (res.status === 429) {
-          return json({ error: "The site's free AI allowance is used up for now (it's shared by all owners). Try again later or tomorrow." }, 502);
-        }
         // Pass the provider's own message through (it never contains the key) so setup problems are diagnosable
         let reason = "";
         try {
@@ -132,6 +129,9 @@ Deno.serve(async (req) => {
           reason = (Array.isArray(parsed) ? parsed[0] : parsed)?.error?.message ?? "";
         } catch {
           reason = detail.slice(0, 200);
+        }
+        if (res.status === 429) {
+          return json({ error: `The AI service is busy or its free allowance is used up (shared by all owners). Try again later.${reason ? ` Details: ${reason}` : ""}` }, 502);
         }
         return json({ error: `The AI service returned an error (${res.status} from ${model})${reason ? `: ${reason}` : "."}` }, 502);
       }
