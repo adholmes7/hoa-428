@@ -39,7 +39,7 @@ function wrap(text: string, font: PDFFont, size: number, width: number): string[
   return lines
 }
 
-export type PdfOptions = { footer?: string }
+export type PdfOptions = { footer?: string; signature?: string | null }
 
 /** Render a plain-text letter (\f = page break) to a letter-size PDF. */
 export async function letterPdf(text: string, opts: PdfOptions = {}): Promise<Uint8Array> {
@@ -49,6 +49,10 @@ export async function letterPdf(text: string, opts: PdfOptions = {}): Promise<Ui
   const size = 11.5
   const lead = size * 1.38
   const width = PAGE_W - MARGIN * 2
+  // A saved signature (PNG data URL) goes on the first blank signature line after "Sincerely,"
+  const sigImg = opts.signature ? await doc.embedPng(opts.signature) : null
+  let closing = false
+  let signed = false
 
   let page: PDFPage = doc.addPage([PAGE_W, PAGE_H])
   let y = PAGE_H - MARGIN
@@ -62,6 +66,8 @@ export async function letterPdf(text: string, opts: PdfOptions = {}): Promise<Ui
       newPage()
       continue
     }
+    if (raw.trim() === 'Sincerely,') closing = true
+    const sigLine = sigImg && closing && !signed && /^_{10,}$/.test(raw.trim())
     const isHeading = /^(Re:|ATTACHMENT:)/.test(raw)
     const f = isHeading ? bold : font
     const clean = sanitize(raw, f)
@@ -69,6 +75,12 @@ export async function letterPdf(text: string, opts: PdfOptions = {}): Promise<Ui
     for (const line of parts) {
       if (y < MARGIN + lead) newPage()
       if (line) page.drawText(line, { x: MARGIN, y, size, font: f, color: rgb(0.07, 0.07, 0.07) })
+      if (sigLine && sigImg) {
+        const h = Math.min(40, sigImg.height)
+        const w = Math.min(200, (sigImg.width / sigImg.height) * h)
+        page.drawImage(sigImg, { x: MARGIN + 4, y: y + 1, width: w, height: (w / sigImg.width) * sigImg.height })
+        signed = true
+      }
       y -= lead
     }
   }

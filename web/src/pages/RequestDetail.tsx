@@ -4,6 +4,7 @@ import { computeDeadline, MAIL_TIERS, METHODS, requestType, todayISO, urgency, t
 import { Attachments } from '../components/Attachments'
 import { Icon } from '../components/Icon'
 import { StatusBadge } from '../components/RequestBits'
+import { SignatureSettings, useSignature } from '../components/Signature'
 import { useAssociation, useProfile } from '../lib/auth'
 import { dueText, fmtDate, fmtDateTime, uspsTrackingUrl } from '../lib/format'
 import { letterSubject } from '../lib/letters'
@@ -50,6 +51,7 @@ export default function RequestDetail() {
   const [returnAddress, setReturnAddress] = useState(profile.mailing_address ?? '')
   const [mail, setMail] = useState<MailStatus | null>(null)
   const [tier, setTier] = useState<MailTier>('certified')
+  const sig = useSignature()
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('requests').select('*').eq('id', id).maybeSingle()
@@ -85,6 +87,9 @@ export default function RequestDetail() {
   const u = urgency(r.status, r.due_date)
   const mailEnabled = Boolean(mail?.enabled)
   const mailLeft = mail ? Math.max(0, mail.limit - mail.used) : 0
+  // Only the owner who drafted the letter can sign it; the letter is in their name
+  const isSigner = r.requester_id === profile.id
+  const signature = isSigner ? sig.image : null
 
   async function update(patch: Partial<RequestRow>, eventKind: string, eventNote?: string) {
     setBusy(true)
@@ -101,8 +106,7 @@ export default function RequestDetail() {
   }
 
   async function pdf() {
-    const bytes = await letterPdf(r!.letter_body ?? '', { footer: `Owner request #${r!.ref_no}` })
-    return bytes
+    return letterPdf(r!.letter_body ?? '', { footer: `Owner request #${r!.ref_no}`, signature })
   }
 
   async function downloadPdf() {
@@ -289,8 +293,18 @@ export default function RequestDetail() {
               {r.status === 'draft' && (
                 <>
                   <p className="ink2" style={{ margin: 0 }}>
-                    Download the PDF, sign it, and send it. {t?.deliveryNote ?? 'Certified Mail with a return receipt gives the best proof.'}
+                    {signature ? 'Download the PDF (it has your signature) and send it.' : 'Download the PDF, sign it, and send it.'}{' '}
+                    {t?.deliveryNote ?? 'Certified Mail with a return receipt gives the best proof.'}
                   </p>
+                  {isSigner ? (
+                    <div className="stack" style={{ gap: 6 }}>
+                      <span className="field" style={{ margin: 0, fontSize: '0.88rem', fontWeight: 500, color: 'var(--ink-2)' }}>Your signature</span>
+                      <SignatureSettings sig={sig} compact />
+                      {!sig.image && <span className="hint">Optional. Saved privately to your account and added to the PDF and to letters the site mails.</span>}
+                    </div>
+                  ) : (
+                    <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>This letter is in another owner's name, so it can only be signed by them.</p>
+                  )}
                   <div className="row">
                     <button className="btn primary" onClick={() => setPanel('sent')}>
                       <Icon name="send" /> I sent it
@@ -394,6 +408,12 @@ export default function RequestDetail() {
                     <div className="notice bad">
                       <b>Live:</b> this mails a real letter through USPS and charges the site's Lob account about $
                       {MAIL_TIERS[tier].price.toFixed(2)}.
+                    </div>
+                  )}
+                  {!signature && (
+                    <div className="notice warn">
+                      This letter will be mailed <b>unsigned</b>, with your typed name only.{' '}
+                      {isSigner ? 'Add your signature under Next step first if you want it signed.' : 'Only the owner who drafted it can sign it.'}
                     </div>
                   )}
                   <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>

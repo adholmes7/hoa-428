@@ -374,3 +374,10 @@ a.item:hover { background: var(--surface-2); border-radius: 8px; }
 .mini-bar .fill.hl { background: var(--viz-1); }
 .mini-bar .v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
 .table-toggle { font-size: 0.84rem; margin-top: 10px; }
+
+/* Signature pad: always paper-white so dark ink shows in either theme */
+.sigpad { position: relative; max-width: 560px; border: 1px solid var(--line); border-radius: 10px; background: #fff; overflow: hidden; }
+.sigpad canvas { display: block; width: 100%; aspect-ratio: 560 / 170; touch-action: none; cursor: crosshair; position: relative; z-index: 1; }
+.sigpad-line { position: absolute; left: 16px; right: 16px; bottom: 34px; border-bottom: 1px solid #b8bfcc; pointer-events: none; }
+.sigpad-line span { position: absolute; left: 0; bottom: 2px; color: #8a93a3; font-size: 0.9rem; }
+.sigimg { height: 44px; max-width: 220px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }

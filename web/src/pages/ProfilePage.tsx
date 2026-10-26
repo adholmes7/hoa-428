@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { HouseholdInvite } from '../components/HouseholdInvite'
+import { SignatureSettings, useSignature } from '../components/Signature'
 import { useAuth, useProfile } from '../lib/auth'
 import { errMsg, supabase } from '../lib/supabase'
 
@@ -17,6 +18,7 @@ export default function ProfilePage() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [pw, setPw] = useState('')
+  const sig = useSignature()
 
   async function save() {
     setMsg('')
@@ -71,6 +73,12 @@ export default function ProfilePage() {
           <h3 style={{ margin: 0 }}>Password</h3>
           <input type="password" minLength={10} autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password (10+ characters)" />
           <div><button className="btn" disabled={pw.length < 10} onClick={changePw}>Change password</button></div>
+          <hr />
+          <h3 style={{ margin: 0 }}>Signature for letters</h3>
+          <p className="ink2" style={{ margin: 0, fontSize: '0.92rem' }}>
+            Added to the PDFs of requests you draft and to letters the site mails for you. Only you can see it.
+          </p>
+          <SignatureSettings sig={sig} />
           <hr />
           <HouseholdInvite />
           <hr />
