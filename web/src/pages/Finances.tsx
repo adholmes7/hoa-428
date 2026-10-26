@@ -52,7 +52,7 @@ export default function Finances() {
           <h1>Finances</h1>
           <p>
             Figures from the 2026 budget packet and the January 2024 reserve study. Budget-vs-actual needs the financial statements;{' '}
-            <Link to="/requests/new?type=records_current">request them</Link>.
+            <Link to="/requests/new?type=records_current">request them</Link>. For the full line-by-line budget, see the <Link to="/budget">budget walkthrough</Link>.
           </p>
         </div>
       </div>

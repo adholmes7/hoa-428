@@ -16,6 +16,7 @@ const Responsibilities = lazy(() => import('./pages/Responsibilities'))
 const Incidents = lazy(() => import('./pages/Incidents'))
 const Meetings = lazy(() => import('./pages/Meetings'))
 const Finances = lazy(() => import('./pages/Finances'))
+const Budget = lazy(() => import('./pages/Budget'))
 const Chat = lazy(() => import('./pages/Chat'))
 const Assistant = lazy(() => import('./pages/Assistant'))
 const Search = lazy(() => import('./pages/Search'))
@@ -64,6 +65,7 @@ function Gate() {
           <Route path="incidents" element={<Incidents />} />
           <Route path="meetings" element={<Meetings />} />
           <Route path="finances" element={<Finances />} />
+          <Route path="budget" element={<Budget />} />
           <Route path="chat" element={<Chat />} />
           <Route path="chat/:id" element={<Chat />} />
           <Route path="assistant" element={<Assistant />} />

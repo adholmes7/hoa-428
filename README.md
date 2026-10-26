@@ -7,6 +7,7 @@ A private website for the 22 owners of 428 Hill Street. Owners can:
 - **Send Certified Mail without a printer** (optional). The letter goes to Lob, which prints it and mails it by USPS Certified Mail with an electronic return receipt. Tracking updates arrive automatically, and the delivery date starts the clock.
 - **Read the CC&Rs** section by section with search and links (`/ccrs/6.3`), plus the budget, reserve study and insurance documents.
 - **Keep shared records:** a maintenance and incident log, Board meetings and minutes (flags minutes later than 30 days), and finance charts.
+- **Walk through the budget:** where the money comes from and goes (a flow diagram), what each unit's dues pay for, every line item, what changed, and the reserve fund's 30-year outlook under each funding plan.
 - **Chat** (opt-in): public channels, private group chats and direct messages, in real time.
 - **Ask the assistant:** an AI helper that answers from the CC&Rs and documents, cites sections, and can start the right request.
 - **Use it on a phone:** the layout is mobile-first, and owners can add it to their home screen like an app.
@@ -181,7 +182,7 @@ Put `AI_PROVIDER=mock` in `supabase/functions/.env` to test the assistant withou
 - **Holidays:** business-day counting uses California judicial holidays. Calendar-day deadlines that land on a weekend or holiday roll to the next business day.
 - **The CC&R copy on file has blank signature and notary blocks.** Confirm the recorded version with the LA County Recorder.
 - **The CC&Rs cite pre-2014 Civil Code numbers** (e.g. §1350, §1363.03). The Davis-Stirling Act was renumbered to §§4000–6150 in 2014; the letters use current numbers.
-- **The 2025–26 premium ($25,943)** isn't in the OCR text; it's flagged "verify" on the Finances page.
+- **Budget walkthrough figures** were transcribed by hand from the scanned budget (PDF pp. 5–7) and the reserve study's 30-year table (PDF p. 11). All category totals match the printed subtotals to the cent. The data lives in `private-data/seed/budget_2026.json` and `reserve_projection.json`.
 - **The manager's email:** the OCR reads "4041@ibpm.com", which is probably 4041@lbpm.com. Confirm before using it.
 
 Not legal advice.

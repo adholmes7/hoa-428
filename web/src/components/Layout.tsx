@@ -20,6 +20,7 @@ const LIBRARY: NavItem[] = [
 const RECORD: NavItem[] = [
   { to: '/incidents', label: 'Maintenance log', icon: 'wrench' },
   { to: '/meetings', label: 'Board meetings', icon: 'calendar' },
+  { to: '/budget', label: 'Budget walkthrough', icon: 'flow' },
   { to: '/finances', label: 'Finances', icon: 'chart' },
 ]
 

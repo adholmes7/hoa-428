@@ -161,17 +161,19 @@ if (!args.includes('--skip-docs')) {
 // ---------------------------------------------------------------------------
 
 const BUDGET = '2026 budget packet, PDF p. 2'
-const STUDY = 'Reserve study (McCaffery, Jan 2024), PDF p. 12'
+const STUDY = 'Reserve study (McCaffery, Jan 2024), executive summary, PDF p. 10'
 const facts = [
+  ['reserve_contribution', 'Budgeted 2023', '2023', 900, 'usd', STUDY],
   ['reserve_contribution', 'Actual (2026 budget)', '2026', 1001.16, 'usd', BUDGET],
   ['reserve_contribution', '5% threshold plan', '2024', 1245, 'usd', STUDY],
-  ['reserve_contribution', 'Recommended plan', '2024', 1353, 'usd', STUDY],
+  ['reserve_contribution', 'Recommended plan', '2024', 1480, 'usd', 'Reserve study (McCaffery, Jan 2024), executive summary, PDF p. 10'],
+  ['percent_funded', '2025', '2025', 64, 'pct', 'Disclosure summary, PDF p. 14'],
   ['percent_funded', '2026', '2026', 62, 'pct', 'Disclosure summary, PDF p. 14'],
   ['percent_funded', '2027', '2027', 62, 'pct', 'Disclosure summary, PDF p. 14'],
   ['percent_funded', '2028', '2028', 61, 'pct', 'Disclosure summary, PDF p. 14'],
   ['percent_funded', '2029', '2029', 43, 'pct', 'Disclosure summary, PDF p. 14'],
   ['premium', '2020–21', '2020', 11737, 'usd', '2020–21 declarations'],
-  ['premium', '2025–26', '2025', 25943, 'usd', '2025–26 renewal declarations', false],
+  ['premium', '2025–26', '2025', 25943, 'usd', '2025–26 renewal declarations (budget packet PDF p. 15)'],
   ['dues', '1 bedroom (12 units)', '2026', 370.82, 'usd', '2026 budget packet, PDF p. 1'],
   ['dues', '2 bedroom (8 units)', '2026', 426.24, 'usd', '2026 budget packet, PDF p. 1'],
   ['dues', '3 bedroom (2 units)', '2026', 563.43, 'usd', '2026 budget packet, PDF p. 1'],
@@ -182,6 +184,20 @@ const facts = [
 await must(sb.from('finance_facts').delete().gte('id', 0), 'clear facts')
 await must(sb.from('finance_facts').insert(facts), 'facts')
 console.log(`finance_facts: ${facts.length}`)
+
+// ---------------------------------------------------------------------------
+// Budget walkthrough: 2026 operating budget (PDF pp. 5–7) and the reserve study's
+// 30-year funding plans (PDF p. 11), transcribed from the scanned pages.
+// ---------------------------------------------------------------------------
+
+const budget = JSON.parse(readFileSync(join(DATA, 'seed/budget_2026.json'), 'utf8'))
+await must(sb.from('budget_lines').delete().eq('year', 2026), 'clear budget')
+await must(sb.from('budget_lines').insert(budget), 'budget')
+console.log(`budget_lines: ${budget.length}`)
+
+const projection = JSON.parse(readFileSync(join(DATA, 'seed/reserve_projection.json'), 'utf8'))
+await must(sb.from('reserve_projection').upsert(projection), 'reserve projection')
+console.log(`reserve_projection: ${projection.length} years`)
 
 // ---------------------------------------------------------------------------
 // Settings (only set if missing, so admin edits aren't overwritten)
