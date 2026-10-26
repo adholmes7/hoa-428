@@ -55,7 +55,14 @@ export default function Assistant() {
     } catch {
       /* storage unavailable */
     }
-    end.current?.scrollIntoView({ behavior: 'smooth' })
+    // Bring a new answer in from its first line, so long answers don't start hidden above the fold
+    const last = turns[turns.length - 1]
+    if (last?.role === 'assistant') {
+      const msgs = document.querySelectorAll('.ai-msg.bot')
+      msgs[msgs.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else {
+      end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
   }, [turns])
 
   async function ask(q: string) {
@@ -163,12 +170,11 @@ export default function Assistant() {
         )}
         {busy && <div className="ai-msg bot muted">Reading the documents…</div>}
         {error && <div className="notice bad">{error}</div>}
-        <div ref={end} />
+        <div ref={end} className="ai-end" />
       </div>
 
       <form
-        className="card row mt"
-        style={{ position: 'sticky', bottom: 'calc(76px + env(safe-area-inset-bottom))', alignItems: 'flex-end' }}
+        className="ai-compose"
         onSubmit={(e) => {
           e.preventDefault()
           ask(text)
@@ -176,7 +182,6 @@ export default function Assistant() {
       >
         <textarea
           rows={2}
-          style={{ flex: 1, minHeight: 48 }}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Describe your situation or ask a question"

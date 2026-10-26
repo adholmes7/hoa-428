@@ -428,3 +428,17 @@ a.item:hover { background: var(--surface-2); border-radius: 8px; }
 /* Signature drawn on the letter's signature line in the preview */
 .letter-sig { position: relative; display: inline-block; }
 .letter-sig img { position: absolute; left: 4px; bottom: 0.55em; height: 2.6em; max-width: 13em; object-fit: contain; object-position: left bottom; pointer-events: none; }
+/* Assistant input: pinned to the bottom on an opaque strip so answers scroll out of sight beneath it, never through it */
+.ai-compose {
+  position: sticky; bottom: 0; z-index: 10; display: flex; gap: 8px; align-items: flex-end;
+  margin: 16px -4px -60px; padding: 12px 4px 20px; background: var(--bg);
+  box-shadow: 0 -12px 12px -4px var(--bg);
+}
+.ai-compose textarea { flex: 1; min-height: 48px; max-height: 30vh; }
+.ai-msg { scroll-margin-top: 16px; }
+.ai-end { scroll-margin-bottom: 110px; }
+@media (max-width: 860px) {
+  .ai-compose { bottom: calc(58px + env(safe-area-inset-bottom)); margin-bottom: calc(-84px - env(safe-area-inset-bottom)); padding-bottom: 12px; }
+  .ai-msg { scroll-margin-top: 72px; }
+  .ai-end { scroll-margin-bottom: 180px; }
+}
