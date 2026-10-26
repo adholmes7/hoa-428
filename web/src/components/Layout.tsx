@@ -10,6 +10,7 @@ const PRIMARY: NavItem[] = [
   { to: '/', label: 'Home', icon: 'home', end: true },
   { to: '/requests', label: 'Requests', icon: 'send' },
   { to: '/assistant', label: 'Ask the assistant', icon: 'sparkle' },
+  { to: '/board', label: 'Bulletin board', icon: 'board' },
   { to: '/chat', label: 'Owner chat', icon: 'chat' },
 ]
 const LIBRARY: NavItem[] = [

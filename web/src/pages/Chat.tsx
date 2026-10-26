@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Icon } from '../components/Icon'
+import { Reactions, useReactions } from '../components/Reactions'
 import { useAuth, useProfile } from '../lib/auth'
 import { fmtTime, initials } from '../lib/format'
 import { errMsg, supabase, type DirectoryEntry } from '../lib/supabase'
@@ -65,6 +66,7 @@ function ChatInner() {
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<number | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const reactions = useReactions('message_id', msgs.map((m) => m.id))
 
   const names = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p])), [people])
   const current = channels.find((c) => c.id === id)
@@ -299,10 +301,14 @@ function ChatInner() {
                         {m.deleted ? 'Message deleted' : m.body}
                         {m.edited_at && !m.deleted && <small className="muted"> (edited)</small>}
                       </div>
-                      {m.user_id === profile.id && !m.deleted && (
-                        <div className="row" style={{ gap: 4 }}>
+                      {!m.deleted && (
+                        <div className="row msg-actions" style={{ gap: 4 }}>
+                          <Reactions column="message_id" target={m.id} rows={reactions.forTarget(m.id)} names={names} disabled={!current.member}
+                            onChange={(next) => reactions.setRows([...reactions.rows.filter((x) => x.message_id !== m.id), ...next])} />
+                          {m.user_id === profile.id && (<>
                           <button className="btn ghost sm" style={{ minHeight: 22, padding: '0 6px', fontSize: '0.75rem' }} onClick={() => { setEditing(m.id); setText(m.body) }}>Edit</button>
                           <button className="btn ghost sm" style={{ minHeight: 22, padding: '0 6px', fontSize: '0.75rem' }} onClick={() => supabase.from('messages').update({ deleted: true }).eq('id', m.id)}>Delete</button>
+                          </>)}
                         </div>
                       )}
                     </div>
