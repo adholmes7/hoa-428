@@ -3,7 +3,7 @@
 // Works with any OpenAI-compatible chat API. Configure with secrets:
 //   AI_API_KEY   (required)
 //   AI_BASE_URL  default https://generativelanguage.googleapis.com/v1beta/openai  (Google Gemini, free tier)
-//   AI_MODEL     default gemini-2.5-flash
+//   AI_MODEL     default gemini-flash-latest (Google's alias for its current Flash model)
 //   AI_DAILY_LIMIT  questions per owner per day, default 40
 // Set AI_PROVIDER=mock to test without a key (returns the retrieved passages).
 
@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
       const key = Deno.env.get("AI_API_KEY");
       if (!key) return json({ error: "The assistant isn't set up yet. An admin needs to add an AI API key (see the README)." }, 503);
       const base = (Deno.env.get("AI_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/$/, "");
-      const model = Deno.env.get("AI_MODEL") ?? "gemini-2.5-flash";
+      const model = Deno.env.get("AI_MODEL") ?? "gemini-flash-latest";
       const res = await fetch(`${base}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
@@ -116,7 +116,16 @@ Deno.serve(async (req) => {
       if (!res.ok) {
         const detail = await res.text();
         console.error("AI provider error", res.status, detail.slice(0, 500));
-        return json({ error: res.status === 429 ? "The free AI quota is used up for now. Try again in a minute." : "The AI service returned an error." }, 502);
+        if (res.status === 429) return json({ error: "The free AI quota is used up for now. Try again in a minute." }, 502);
+        // Pass the provider's own message through (it never contains the key) so setup problems are diagnosable
+        let reason = "";
+        try {
+          const parsed = JSON.parse(detail);
+          reason = (Array.isArray(parsed) ? parsed[0] : parsed)?.error?.message ?? "";
+        } catch {
+          reason = detail.slice(0, 200);
+        }
+        return json({ error: `The AI service returned an error (${res.status} from ${model})${reason ? `: ${reason}` : "."}` }, 502);
       }
       const out = await res.json();
       text = out.choices?.[0]?.message?.content ?? "";

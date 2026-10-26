@@ -20,7 +20,7 @@ Only owners can get in. Each unit gets a hand-delivered letter with a unique cod
 |---|---|---|
 | Website (static React app) | GitHub Pages, your domain | Free (domain about $12/yr) |
 | Accounts, database, file storage, live chat | Supabase free tier | Free |
-| AI assistant | Google Gemini API free tier (any OpenAI-compatible API works) | Free |
+| AI assistant | Google Gemini API free tier (any OpenAI-compatible API works; default model `gemini-flash-latest`) | Free |
 | Certified mail (optional) | Lob | About $6–9 per letter |
 | Login emails (recommended) | Resend free tier as SMTP | Free |
 
