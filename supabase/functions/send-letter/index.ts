@@ -1,67 +1,32 @@
-// Sends a request letter through Lob (https://lob.com) by USPS first-class mail, Certified Mail, or
-// Certified Mail with electronic return receipt, then marks the request as sent and records tracking
-// and the deadline estimate.
+// Mails a request letter through Lob (see _shared/mailer.ts) by USPS first-class mail, Certified Mail, or
+// Certified Mail with electronic return receipt.
 //
-// Secrets:
-//   LOB_API_KEY         required. A test_ key accepts letters without mailing them.
+// Owners pay for each letter by card: { checkout: true } starts a Stripe Checkout and stripe-webhook mails the
+// letter once the payment clears. Admins can also send right away at the site's expense.
+//
+// Secrets: LOB_API_KEY (see mailer.ts), STRIPE_* (see stripe.ts), RESEND_* (see email.ts), and
 //   MAIL_MONTHLY_LIMIT  optional: letters per unit per calendar month, default 4
-//   LOB_API_BASE        optional, for local testing against a fake server
 //
-// POST { status: true }                      -> { enabled, test, limit, used, price_note, email: { enabled, hoa } }
-// POST { request_id, pdf_base64, return_address, service, email_copy } -> sends the letter
-//   email_copy (default true): also email the PDF to the HOA with the owner copied (see _shared/email.ts)
-//   service: "first_class" | "certified" | "certified_rr"
+// POST { status: true }   -> { enabled, test, limit, used, price_note, payment, prices, owner_prices, email }
+// POST { admin_log: true } -> every letter mailed through the site (admins only)
+// POST { request_id, pdf_base64, return_address, service, email_copy, checkout? }
+//   checkout: true  -> { url } of the Stripe payment page
+//   otherwise       -> sends now (admins only)
 
-import { addCalendarDays, computeDeadline, requestType, todayISO } from "../_shared/deadlines.ts";
-import { emailEnabled, hoaRecipients, mailFrom, sendLetterCopy } from "../_shared/email.ts";
-import { envelopeTo, howSentText } from "../_shared/letter-copy.ts";
+import { requestType, todayISO } from "../_shared/deadlines.ts";
+import { emailEnabled, hoaRecipients, mailFrom } from "../_shared/email.ts";
 import { adminClient, cors, json, requireOwner } from "../_shared/http.ts";
+import { associationAddress, envelopes, lobKey, lobTest, mailLetter, SERVICES, type Service } from "../_shared/mailer.ts";
+import { ownerPriceCents, paymentsReady, stripe } from "../_shared/stripe.ts";
 
-type Addr = {
-  name: string;
-  company?: string;
-  address_line1: string;
-  address_line2?: string;
-  address_city: string;
-  address_state: string;
-  address_zip: string;
-};
+const monthStart = () => todayISO().slice(0, 8) + "01";
 
-/** Parse "Name\nStreet\n[Line 2]\nCity, ST 12345" style text. */
-function parseAddress(text: string, fallbackName: string): Addr | null {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) return null;
-  const last = lines[lines.length - 1].match(/^(.+?),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i);
-  if (!last) return null;
-  const body = lines.slice(0, -1);
-  // If the first line has no digits it's a name line
-  const name = body.length > 1 && !/\d/.test(body[0]) ? body.shift()! : fallbackName;
-  return {
-    name: name.slice(0, 40),
-    address_line1: body[0],
-    address_line2: body[1],
-    address_city: last[1].replace(/,$/, ""),
-    address_state: last[2].toUpperCase(),
-    address_zip: last[3],
-  };
-}
-
-// Lob Developer-plan list prices (Oct 2026): B&W first-class letter $1.06, certified $6.95,
-// certified with electronic return receipt $9.86, each extra page (the address page) $0.10
-const SERVICES = {
-  first_class: { extra: null, price: 1.16, method: "first_class", label: "First-class mail" },
-  certified: { extra: "certified", price: 8.11, method: "online_certified", label: "Certified Mail" },
-  certified_rr: {
-    extra: "certified_return_receipt",
-    price: 11.02,
-    method: "online_certified",
-    label: "Certified Mail with electronic return receipt",
-  },
-} as const;
-type Service = keyof typeof SERVICES;
-
-function monthStart() {
-  return todayISO().slice(0, 8) + "01";
+/** Where Stripe sends the owner back to: this site (or a local dev server), never an arbitrary origin. */
+function returnOrigin(req: Request, siteUrl: unknown) {
+  const o = req.headers.get("origin") ?? "";
+  if (/^https:\/\/(www\.)?428hillstreet\.com$/.test(o) || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(o)) return o;
+  if (typeof siteUrl === "string" && siteUrl && o === siteUrl.replace(/\/$/, "")) return o;
+  return typeof siteUrl === "string" && siteUrl ? siteUrl.replace(/\/$/, "") : "https://428hillstreet.com";
 }
 
 Deno.serve(async (req) => {
@@ -70,8 +35,9 @@ Deno.serve(async (req) => {
     const owner = await requireOwner(req);
     if ("error" in owner) return owner.error;
     const { sb, profile, user } = owner;
+    const isAdmin = profile.role === "admin";
 
-    const key = Deno.env.get("LOB_API_KEY");
+    const key = lobKey();
     const limit = Number(Deno.env.get("MAIL_MONTHLY_LIMIT") ?? 4);
     const admin = adminClient();
     // Count this unit's letters mailed through the service this month (service role, so private requests count too)
@@ -85,10 +51,10 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     if (body.admin_log) {
       // Admins see every letter sent through the service, including private requests (no letter text)
-      if (profile.role !== "admin") return json({ error: "Admins only" }, 403);
+      if (!isAdmin) return json({ error: "Admins only" }, 403);
       const { data } = await admin
         .from("requests")
-        .select("id, ref_no, unit_id, type, title, visibility, sent_date, status, tracking_status, mail_cost_estimate")
+        .select("id, ref_no, unit_id, type, title, visibility, sent_date, status, tracking_status, mail_cost_estimate, mail_paid_cents")
         .eq("mail_provider", "lob")
         .order("sent_date", { ascending: false })
         .limit(200);
@@ -96,17 +62,21 @@ Deno.serve(async (req) => {
         letters: (data ?? []).map((l) => ({ ...l, title: l.visibility === "private" ? "(private request)" : l.title })),
       });
     }
+
+    const pay = paymentsReady();
     if (body.status) {
       const { data: setting } = await sb.from("site_settings").select("value").eq("key", "mail_service").maybeSingle();
-      const { data: assoc } = await sb.from("site_settings").select("value").eq("key", "association").maybeSingle();
       return json({
-        email: { enabled: emailEnabled(), from: mailFrom(), hoa: hoaRecipients(assoc?.value ?? {}), owner: profile.contact_email || user.email || null },
+        email: { enabled: emailEnabled(), from: mailFrom(), hoa: hoaRecipients(await associationAddress(sb)), owner: profile.contact_email || user.email || null },
         enabled: Boolean(key),
-        test: Boolean(key?.startsWith("test_")),
+        test: lobTest(),
         limit,
         used: used ?? 0,
         price_note: setting?.value?.price_note ?? "",
+        // "card": pays by card first; "free": admin may send at the site's expense (or pay, to try checkout)
+        payment: { card: pay.ok, free: isAdmin, why: pay.ok ? null : pay.why },
         prices: Object.fromEntries(Object.entries(SERVICES).map(([k, v]) => [k, v.price])),
+        owner_prices: Object.fromEntries(Object.entries(SERVICES).map(([k, v]) => [k, ownerPriceCents(v.price) / 100])),
       });
     }
 
@@ -114,145 +84,104 @@ Deno.serve(async (req) => {
     if ((used ?? 0) >= limit) {
       return json({ error: `Your unit has already mailed ${limit} letters through the service this month. Ask the site admin if you need more.` }, 429);
     }
+    const checkout = Boolean(body.checkout);
+    if (!checkout && !isAdmin) return json({ error: "Letters are paid for by card. Reload the page and try again." }, 403);
+    if (checkout && !pay.ok) return json({ error: pay.why }, 503);
 
     const { request_id, pdf_base64, return_address } = body;
     if (!(body.service in SERVICES)) return json({ error: "Choose a mailing option" }, 400);
-    const service = SERVICES[body.service as Service];
+    const serviceKey = body.service as Service;
+    const service = SERVICES[serviceKey];
     const { data: r } = await sb.from("requests").select("*").eq("id", request_id).maybeSingle();
     if (!r || r.unit_id !== profile.unit_id) return json({ error: "Request not found" }, 404);
     if (r.status !== "draft") return json({ error: "This request has already been sent" }, 409);
-    if (body.service === "first_class" && requestType(r.type)?.requiresCertified) {
+    if (serviceKey === "first_class" && requestType(r.type)?.requiresCertified) {
       return json({ error: "This request must go by certified mail or personal delivery (CC&R §7.3)." }, 400);
     }
+    const env = envelopes(await associationAddress(sb), return_address, profile);
+    if ("error" in env) return json({ error: env.error }, 400);
 
-    const { data: setting } = await sb.from("site_settings").select("value").eq("key", "association").maybeSingle();
-    const a = {
-      name: "Four Twenty-Eight Hill Street Homeowners Association",
-      care_of: "c/o LBPM",
-      attn: "Attn: Lida Ibrahimpasic",
-      street: "4730 Woodman Ave., #200",
-      city_state_zip: "Sherman Oaks, CA 91423",
-      ...(setting?.value ?? {}),
-    };
-    const env = envelopeTo(a);
-    const to = parseAddress(`${env.name}\n${env.street}\n${env.cityStateZip}`, env.name);
-    const from = parseAddress(
-      return_address?.trim() || `${profile.display_name}\n428 Hill Street, Unit ${profile.unit_id}\nSanta Monica, CA 90405`,
-      profile.display_name,
-    );
-    if (!to) return json({ error: "The association address in Admin settings couldn't be read" }, 400);
-    if (!from) return json({ error: 'Return address must end with a line like "Santa Monica, CA 90405"' }, 400);
-    to.company = env.company;
-
-    const pdf = Uint8Array.from(atob(pdf_base64), (c) => c.charCodeAt(0));
-    if (pdf.length > 5_000_000) return json({ error: "Letter PDF is too large" }, 400);
-
-    // Save the exact PDF being mailed on the request (proof of contents), then give Lob a short-lived link to it
+    const pdf = Uint8Array.from(atob(pdf_base64 ?? ""), (c) => c.charCodeAt(0));
+    if (pdf.length === 0 || pdf.length > 5_000_000) return json({ error: "Letter PDF is missing or too large" }, 400);
+    // Keep the exact PDF being mailed (it becomes the "as mailed" copy on the request)
     const path = `${user.id}/${crypto.randomUUID()}-request-${r.ref_no}-as-mailed.pdf`;
     const { error: upErr } = await sb.storage.from("attachments").upload(path, pdf, { contentType: "application/pdf" });
     if (upErr) throw upErr;
-    const { data: att, error: attErr } = await sb
-      .from("attachments")
+    const emailCopy = body.email_copy !== false;
+
+    if (!checkout) {
+      const sent = await mailLetter({
+        admin,
+        requestId: r.id,
+        service: serviceKey,
+        to: env.to,
+        from: env.from,
+        pdfPath: path,
+        emailCopy,
+        sender: { id: user.id, display_name: profile.display_name, unit_id: profile.unit_id, email: profile.contact_email || user.email || null },
+      });
+      if (!sent.ok) {
+        await admin.storage.from("attachments").remove([path]);
+        return json({ error: sent.error }, sent.status);
+      }
+      return json(sent);
+    }
+
+    // Starting over (e.g. after backing out of the payment page) closes any earlier unpaid checkout for this letter
+    const { data: open } = await admin.from("mail_orders").select("id, stripe_session_id").eq("request_id", r.id).eq("status", "pending");
+    for (const o of open ?? []) {
+      if (o.stripe_session_id) await stripe(`checkout/sessions/${o.stripe_session_id}/expire`).catch(() => null);
+      await admin.from("mail_orders").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", o.id).eq("status", "pending");
+    }
+
+    const amount = ownerPriceCents(service.price);
+    const { data: order, error: oErr } = await admin
+      .from("mail_orders")
       .insert({
         request_id: r.id,
-        storage_path: path,
-        file_name: `request-${r.ref_no}-as-mailed.pdf`,
-        mime_type: "application/pdf",
-        size_bytes: pdf.length,
-        label: `Letter as mailed (${service.label})`,
-        uploaded_by: user.id,
+        user_id: user.id,
+        unit_id: profile.unit_id,
+        service: serviceKey,
+        email_copy: emailCopy,
+        to_addr: env.to,
+        from_addr: env.from,
+        pdf_path: path,
+        amount_cents: amount,
+        lob_cost: service.price,
       })
       .select("id")
       .single();
-    if (attErr) throw attErr;
-    const { data: signed, error: signErr } = await admin.storage.from("attachments").createSignedUrl(path, 60 * 60);
-    if (signErr) throw signErr;
+    if (oErr) throw oErr;
 
-    const base = (Deno.env.get("LOB_API_BASE") ?? "https://api.lob.com").replace(/\/$/, "");
-    const res = await fetch(`${base}/v1/letters`, {
-      method: "POST",
-      headers: { Authorization: `Basic ${btoa(`${key}:`)}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        description: `428 Hill owner request #${r.ref_no}`.slice(0, 255),
-        to,
-        from,
-        file: signed.signedUrl,
-        color: false,
-        double_sided: false,
-        // Our letters aren't laid out for the envelope window, so Lob adds an address page in front
-        address_placement: "insert_blank_page",
-        mail_type: "usps_first_class",
-        extra_service: service.extra,
-        use_type: "operational",
-        metadata: { request_id: r.id },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    const out = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error("Lob error", res.status, out);
-      // The letter wasn't accepted, so don't keep the "as mailed" copy
-      await sb.from("attachments").delete().eq("id", att.id);
-      await sb.storage.from("attachments").remove([path]);
-      return json({ error: out?.error?.message ?? "The mailing service rejected the letter" }, 502);
-    }
-
-    // Lob prints and hands the letter to USPS on its send date; until the delivery scan, estimate
-    // receipt from Lob's expected delivery date (falling back to the method's transit estimate)
-    const test = key.startsWith("test_");
-    const sentDate = typeof out.send_date === "string" ? out.send_date.slice(0, 10) : todayISO();
-    const expected = typeof out.expected_delivery_date === "string" ? out.expected_delivery_date.slice(0, 10) : null;
-    const d = computeDeadline({ type: r.type, method: service.method, sentDate, receivedDate: expected });
-    await sb
-      .from("requests")
-      .update({
-        status: "sent",
-        method: service.method,
-        sent_date: sentDate,
-        mail_provider: "lob",
-        mail_provider_id: out.id,
-        carrier: "USPS",
-        // First-class letters have no USPS tracking number; Lob's mail scans still arrive by webhook
-        tracking_number: out.tracking_number ?? null,
-        tracking_status: test ? "Test mode: not actually mailed" : "Accepted by the mailing service",
-        tracking_updated_at: new Date().toISOString(),
-        due_date: d.dueDate,
-        received_date: null,
-        received_estimated: true,
-        mail_cost_estimate: service.price,
-      })
-      .eq("id", r.id);
-    await sb.from("request_events").insert({
-      request_id: r.id,
-      kind: "sent",
-      note: [
-        `${service.label} via Lob (${out.id})`,
-        test ? "TEST MODE, not mailed" : null,
-        expected ? `expected delivery ${expected}` : `estimated delivery ${addCalendarDays(sentDate, 4)}`,
-        d.dueDate ? `estimated deadline ${d.dueDate} until USPS confirms delivery` : null,
-      ]
-        .filter(Boolean)
-        .join("; "),
-      created_by: user.id,
-    });
-    let email: Awaited<ReturnType<typeof sendLetterCopy>> | null = null;
-    if (body.email_copy !== false && emailEnabled()) {
-      email = await sendLetterCopy({
-        sb: admin,
-        requestId: r.id,
-        refNo: r.ref_no,
-        subject: r.title,
-        ownerName: profile.display_name,
-        ownerEmail: profile.contact_email || user.email || null,
-        hoa: hoaRecipients(setting?.value ?? {}),
-        pdf,
-        howSent: howSentText(service.label, sentDate, out.tracking_number),
-        test,
-        letterText: r.letter_body,
-        actorId: user.id,
+    const { data: siteUrl } = await sb.from("site_settings").select("value").eq("key", "site_url").maybeSingle();
+    const origin = returnOrigin(req, siteUrl?.value);
+    let session: { id: string; url: string };
+    try {
+      session = await stripe<{ id: string; url: string }>("checkout/sessions", {
+      mode: "payment",
+      success_url: `${origin}/requests/${r.id}?paid=${order.id}`,
+      cancel_url: `${origin}/requests/${r.id}?mail=cancelled`,
+      client_reference_id: order.id,
+      "metadata[order_id]": order.id,
+      "payment_intent_data[metadata][order_id]": order.id,
+      "payment_intent_data[description]": `428 Hill owner request #${r.ref_no}: ${service.label}`,
+      customer_email: profile.contact_email || user.email || undefined,
+      "line_items[0][quantity]": 1,
+      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][unit_amount]": amount,
+      "line_items[0][price_data][product_data][name]": `${service.label}: owner request #${r.ref_no}`,
+      "line_items[0][price_data][product_data][description]":
+        `Printed and mailed by USPS to the HOA board. $${service.price.toFixed(2)} printing and postage plus card processing.`,
+      // Stripe's minimum; an unpaid checkout closes after this
+      expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
       });
+    } catch (e) {
+      await admin.from("mail_orders").update({ status: "failed", error: String(e) }).eq("id", order.id);
+      await admin.storage.from("attachments").remove([path]);
+      return json({ error: `The payment page couldn't be opened: ${e instanceof Error ? e.message : e}` }, 502);
     }
-    return json({ ok: true, id: out.id, tracking_number: out.tracking_number ?? null, test, expected_delivery_date: expected, email });
+    await admin.from("mail_orders").update({ stripe_session_id: session.id, checkout_url: session.url }).eq("id", order.id);
+    return json({ url: session.url, order_id: order.id });
   } catch (e) {
     console.error(e);
     return json({ error: "Something went wrong" }, 500);

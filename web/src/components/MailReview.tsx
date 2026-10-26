@@ -13,6 +13,9 @@ export type MailStatus = {
   used: number
   price_note: string
   email?: { enabled: boolean; from: string | null; hoa: string[]; owner: string | null }
+  // card: owners can pay by card; free: this user (an admin) may send at the site's expense
+  payment?: { card: boolean; free: boolean; why: string | null }
+  owner_prices?: Record<string, number>
 }
 
 /** Opt-out checkbox for emailing a copy of the letter to the HOA and the owner. */
@@ -75,6 +78,8 @@ type ReviewProps = {
   unit: number
   mail: MailStatus
   emailCopy: boolean
+  paying: boolean // pays by card through Stripe before it's sent
+  price: number
   busy: boolean
   error: string
   onBack: () => void
@@ -117,9 +122,14 @@ export function MailReview(p: ReviewProps) {
     }
   }, [])
 
+  const price = `$${p.price.toFixed(2)}`
   const sendLabel = p.busy
-    ? 'Sending…'
-    : `${test ? 'Send test letter' : `Mail it for real (~$${m.price.toFixed(2)})`}${copy ? ' and email the copy' : ''}`
+    ? p.paying
+      ? 'Opening the payment page…'
+      : 'Sending…'
+    : p.paying
+      ? `Pay ${price} and send${copy ? ' with the email copy' : ''}`
+      : `${test ? 'Send test letter' : `Mail it for real (~${price})`}${copy ? ' and email the copy' : ''}`
 
   // Rendered at the top of the page so no card or column can clip it
   return createPortal(
@@ -135,12 +145,14 @@ export function MailReview(p: ReviewProps) {
 
         <div className="review-scroll">
           <p className="ink2" style={{ marginTop: 0 }}>
-            Nothing has been sent yet. Check the envelope, the letter and the email below. The button at the bottom does both:
-            it sends the letter to Lob{copy ? ' and then emails the copy' : ''}.
+            Nothing has been sent yet. Check the envelope, the letter and the email below.{' '}
+            {p.paying
+              ? `The button at the bottom takes you to Stripe's secure page to pay ${price}. As soon as the payment goes through, the letter goes to Lob${copy ? ' and the email copy goes out' : ''}, and you come back here.`
+              : `The button at the bottom does both: it sends the letter to Lob${copy ? ' and then emails the copy' : ''}.`}
           </p>
 
           <section className="review-section">
-            <h3><span className="step-num">1</span> Letter by {m.label} <span className="muted" style={{ fontWeight: 400 }}>· about ${m.price.toFixed(2)}</span></h3>
+            <h3><span className="step-num">1</span> Letter by {m.label} <span className="muted" style={{ fontWeight: 400 }}>· {p.paying ? `${price} by card` : `about ${price}`}</span></h3>
             <div className="envelope">
               <div>
                 <div className="muted env-label">From</div>
@@ -177,10 +189,26 @@ export function MailReview(p: ReviewProps) {
         </div>
 
         <div className="review-foot">
-          {!test && (
-            <div className="notice bad" style={{ margin: 0 }}>
-              <b>Live:</b> this mails a real letter through USPS and charges the site's Lob account about ${m.price.toFixed(2)}.
+          {p.paying ? (
+            <div className={`notice ${test ? 'warn' : 'bad'}`} style={{ margin: 0 }}>
+              {test ? (
+                <>
+                  <b>Test mode:</b> pay with Stripe's test card 4242 4242 4242 4242 (any future date, any CVC). Nothing is charged or
+                  mailed.
+                </>
+              ) : (
+                <>
+                  <b>Live:</b> you pay {price} by card and a real letter is mailed by USPS. If the mailing service rejects it, the payment
+                  is refunded automatically.
+                </>
+              )}
             </div>
+          ) : (
+            !test && (
+              <div className="notice bad" style={{ margin: 0 }}>
+                <b>Live:</b> this mails a real letter through USPS and charges the site's Lob account about {price}.
+              </div>
+            )
           )}
           {p.error && <div className="notice bad" style={{ margin: 0 }}>{p.error}</div>}
           <div className="row">

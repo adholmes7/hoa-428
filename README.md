@@ -167,6 +167,24 @@ When an owner mails a letter (with **Mail it for me** or by marking it sent), th
 
 3. Deploy the functions: `npx supabase functions deploy send-letter email-letter`.
 
+### 8. Owners pay for their letters (Stripe)
+
+Owners pay for each letter they mail through the site by card, on Stripe's own checkout page (cards, Apple Pay, Google Pay); the site never sees card details and owners never need a Lob account. The price is Lob's cost plus Stripe's fee (2.9% + 30¢): about $1.51 first-class, $8.67 Certified, $11.66 Certified with return receipt. The letter is mailed only after the payment clears (by the `stripe-webhook` function); if Lob rejects it, the payment is refunded automatically. Admins can still send at the site's expense, or tick "Pay by card" to try checkout. Until Stripe is set up, only admins can mail through the site.
+
+Stripe and Lob must be in the same mode (both test or both live), or mailing pauses: test payments never mail real letters, and real payments never go to test letters.
+
+1. Create a Stripe account at [stripe.com](https://stripe.com) (an individual account is fine) and add the bank account that pays Lob.
+2. In **Developers → Webhooks**, add an endpoint `https://YOUR-PROJECT.supabase.co/functions/v1/stripe-webhook` for the events `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.expired`.
+3. Set the keys (the secret key from **Developers → API keys**, the signing secret from the webhook):
+
+   ```bash
+   npx supabase secrets set STRIPE_SECRET_KEY=sk_live_xxx STRIPE_WEBHOOK_SECRET=whsec_xxx
+   ```
+
+4. Deploy: `npx supabase functions deploy send-letter email-letter` and `npx supabase functions deploy stripe-webhook --no-verify-jwt`.
+
+**Admin → Letters mailed by the site** shows what each owner paid; payments and refunds are in the Stripe dashboard.
+
 ## Running it locally
 
 Requires Docker.

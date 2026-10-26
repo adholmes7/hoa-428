@@ -15,6 +15,7 @@ type Letter = {
   status: string
   tracking_status: string | null
   mail_cost_estimate: number | null
+  mail_paid_cents: number | null
 }
 
 const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
@@ -36,12 +37,15 @@ export function MailLog() {
   const month = new Date().toISOString().slice(0, 7)
   const thisMonth = (letters ?? []).filter((l) => l.sent_date?.startsWith(month))
   const sum = (ls: Letter[]) => ls.reduce((n, l) => n + Number(l.mail_cost_estimate ?? 0), 0)
+  // What the site's Lob account carried: letters nobody paid for by card (admin sends)
+  const sitePaid = (ls: Letter[]) => sum(ls.filter((l) => l.mail_paid_cents == null))
 
   return (
     <div className="card">
       <h2>Letters mailed by the site</h2>
       <p className="ink2" style={{ fontSize: '0.92rem' }}>
-        Every letter sent through Lob, with estimated postage. Check the{' '}
+        Every letter sent through Lob, with estimated postage and what the owner paid by card. Card payments and refunds are in
+        the <a href="https://dashboard.stripe.com/payments" target="_blank" rel="noreferrer">Stripe dashboard</a>; check the{' '}
         <a href="https://dashboard.lob.com" target="_blank" rel="noreferrer">Lob dashboard</a> for actual charges.
       </p>
       {error && <div className="notice bad mb">{error}</div>}
@@ -52,7 +56,7 @@ export function MailLog() {
           <div className="grid grid-3 mb">
             <div className="card stat"><div className="n">{thisMonth.length}</div><div className="l">Letters this month</div></div>
             <div className="card stat"><div className="n">{usd(sum(thisMonth))}</div><div className="l">Estimated, this month</div></div>
-            <div className="card stat"><div className="n">{usd(sum(letters))}</div><div className="l">Estimated, all time</div></div>
+            <div className="card stat"><div className="n">{usd(sitePaid(letters))}</div><div className="l">Not paid by owners, all time</div></div>
           </div>
           {letters.length === 0 ? (
             <p className="muted" style={{ marginBottom: 0 }}>No letters mailed yet.</p>
@@ -60,7 +64,7 @@ export function MailLog() {
             <div className="table-wrap">
               <table className="list">
                 <thead>
-                  <tr><th>Request</th><th>Unit</th><th>Mailed</th><th>USPS status</th><th style={{ textAlign: 'right' }}>Est. cost</th></tr>
+                  <tr><th>Request</th><th>Unit</th><th>Mailed</th><th>USPS status</th><th style={{ textAlign: 'right' }}>Est. cost</th><th style={{ textAlign: 'right' }}>Owner paid</th></tr>
                 </thead>
                 <tbody>
                   {letters.map((l) => (
@@ -76,6 +80,7 @@ export function MailLog() {
                       <td>{fmtDate(l.sent_date)}</td>
                       <td>{l.tracking_status ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>{l.mail_cost_estimate != null ? usd(Number(l.mail_cost_estimate)) : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{l.mail_paid_cents != null ? usd(l.mail_paid_cents / 100) : <span className="muted">Site</span>}</td>
                     </tr>
                   ))}
                 </tbody>

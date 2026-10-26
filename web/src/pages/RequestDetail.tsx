@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { composeLetterCopy } from '@shared/letter-copy.ts'
 import { computeDeadline, MAIL_TIERS, METHODS, requestType, todayISO, urgency, type MailTier, type Method } from '@shared/deadlines.ts'
 import { Attachments } from '../components/Attachments'
@@ -56,6 +56,9 @@ export default function RequestDetail() {
   const sig = useSignature()
   const [copyByEmail, setCopyByEmail] = useState(true)
   const [reviewing, setReviewing] = useState(false)
+  const [cardForAdmin, setCardForAdmin] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const [payNote, setPayNote] = useState<{ kind: 'ok' | 'warn' | 'bad'; text: string } | null>(null)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('requests').select('*').eq('id', id).maybeSingle()
@@ -78,6 +81,44 @@ export default function RequestDetail() {
     })
   }, [])
 
+  // Back from Stripe: follow the order until the webhook has mailed the letter (or refunded it)
+  useEffect(() => {
+    const paid = params.get('paid')
+    if (params.get('mail') === 'cancelled') {
+      setPayNote({ kind: 'warn', text: 'Payment cancelled. Nothing was charged or mailed, and the letter is still a draft.' })
+      setParams({}, { replace: true })
+      return
+    }
+    if (!paid) return
+    setParams({}, { replace: true })
+    let stop = false
+    let tries = 0
+    setPayNote({ kind: 'ok', text: 'Payment received. Sending your letter…' })
+    const tick = async () => {
+      const { data } = await supabase.from('mail_orders').select('status, error, amount_cents').eq('id', paid).maybeSingle()
+      if (stop) return
+      const amount = data ? `$${(data.amount_cents / 100).toFixed(2)}` : 'your payment'
+      if (data?.status === 'sent') {
+        setPayNote({ kind: 'ok', text: `Paid ${amount} and mailed. Tracking and the email copy are in the history below.` })
+        return load()
+      }
+      if (data?.status === 'refunded') {
+        setPayNote({ kind: 'bad', text: `The letter couldn't be mailed (${data.error}). Your ${amount} payment has been refunded.` })
+        return load()
+      }
+      if (data?.status === 'failed') {
+        setPayNote({ kind: 'bad', text: data.error ?? 'The letter couldn’t be mailed. The site admin has been notified in the history.' })
+        return load()
+      }
+      if (++tries < 45) setTimeout(tick, 2000)
+      else setPayNote({ kind: 'warn', text: 'Your payment went through, but sending is taking longer than usual. Reload in a minute; if it still shows as a draft, tell the site admin.' })
+    }
+    tick()
+    return () => {
+      stop = true
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const rt = r ? requestType(r.type) : undefined
     if (rt) setTier(rt.mailTier)
@@ -92,6 +133,12 @@ export default function RequestDetail() {
   const mailEnabled = Boolean(mail?.enabled)
   const mailLeft = mail ? Math.max(0, mail.limit - mail.used) : 0
   const emailOn = Boolean(mail?.email?.enabled)
+  // Owners pay by card through Stripe; admins send at the site's expense unless they choose to pay
+  const canCard = Boolean(mail?.payment?.card)
+  const freeSend = Boolean(mail?.payment?.free)
+  const paying = freeSend ? cardForAdmin && canCard : canCard
+  const canMail = freeSend || canCard
+  const priceOf = (k: MailTier) => (paying ? (mail?.owner_prices?.[k] ?? MAIL_TIERS[k].price) : MAIL_TIERS[k].price)
   // Only the owner who drafted the letter can sign it; the letter is in their name
   const isSigner = r.requester_id === profile.id
   const signature = isSigner ? sig.image : null
@@ -171,7 +218,14 @@ export default function RequestDetail() {
     try {
       const bytes = await pdf()
       const { data, error } = await supabase.functions.invoke('send-letter', {
-        body: { request_id: r!.id, pdf_base64: bytesToBase64(bytes), return_address: returnAddress, service: tier, email_copy: emailOn && copyByEmail },
+        body: {
+          request_id: r!.id,
+          pdf_base64: bytesToBase64(bytes),
+          return_address: returnAddress,
+          service: tier,
+          email_copy: emailOn && copyByEmail,
+          checkout: paying,
+        },
       })
       if (error) {
         const ctx = (error as { context?: Response }).context
@@ -179,13 +233,18 @@ export default function RequestDetail() {
         throw new Error(detail?.error ?? error.message)
       }
       if (data?.error) throw new Error(data.error)
+      if (data?.url) {
+        // Off to Stripe's payment page; the letter is mailed when the payment clears
+        window.location.assign(data.url)
+        return
+      }
       setReviewing(false)
       setPanel(null)
       setMail((m) => (m ? { ...m, used: m.used + 1 } : m))
       await load()
+      setBusy(false)
     } catch (e) {
       setError(errMsg(e))
-    } finally {
       setBusy(false)
     }
   }
@@ -236,6 +295,7 @@ export default function RequestDetail() {
         )}
       </div>
 
+      {payNote && <div className={`notice ${payNote.kind} mb`}>{payNote.text}</div>}
       {error && <div className="notice bad mb">{error}</div>}
 
       {u === 'overdue' && (
@@ -438,11 +498,23 @@ export default function RequestDetail() {
                   </p>
                   {mail?.test ? (
                     <div className="notice warn">Test mode: the service will accept this letter but won't actually mail it.</div>
-                  ) : (
+                  ) : paying ? (
+                    <div className="notice">
+                      You pay <b>${priceOf(tier).toFixed(2)}</b> by card for this letter (printing, postage and the card fee). Nothing is charged
+                      until you confirm on the payment page.
+                    </div>
+                  ) : canMail ? (
                     <div className="notice bad">
                       <b>Live:</b> this mails a real letter through USPS and charges the site's Lob account about $
                       {MAIL_TIERS[tier].price.toFixed(2)}.
                     </div>
+                  ) : null}
+                  {!canMail && <div className="notice bad">{mail?.payment?.why ?? 'Mailing through the site is paused.'} Ask the site admin.</div>}
+                  {freeSend && canCard && (
+                    <label className="check">
+                      <input type="checkbox" checked={cardForAdmin} onChange={(e) => setCardForAdmin(e.target.checked)} />
+                      <span>Pay by card like other owners (admins can otherwise send at the site's expense)</span>
+                    </label>
                   )}
                   {!signature && (
                     <div className="notice warn">
@@ -461,7 +533,7 @@ export default function RequestDetail() {
                         <label key={k} className="check card" style={{ padding: '10px 12px', opacity: blocked ? 0.55 : 1, cursor: blocked ? 'not-allowed' : 'pointer' }}>
                           <input type="radio" name="tier" checked={tier === k} disabled={blocked} onChange={() => setTier(k)} />
                           <span>
-                            <b>{m.label}</b> · about ${m.price.toFixed(2)}
+                            <b>{m.label}</b> · {paying ? `$${priceOf(k).toFixed(2)}` : `about $${m.price.toFixed(2)}`}
                             {t?.mailTier === k && <span className="badge brand" style={{ marginLeft: 8 }}>Recommended for this request</span>}
                             <br />
                             <span className="muted" style={{ fontSize: '0.85rem' }}>
@@ -477,12 +549,15 @@ export default function RequestDetail() {
                     <textarea style={{ minHeight: 70 }} value={returnAddress} onChange={(e) => setReturnAddress(e.target.value)} placeholder={`Your name\n428 Hill Street, Unit ${profile.unit_id}\nSanta Monica, CA 90405`} />
                   </label>
                   <p className="muted" style={{ fontSize: '0.85rem', margin: 0 }}>
-                    {mail?.price_note || 'The mailing service charges per letter; the site admin covers or splits the cost.'} Your unit can mail{' '}
+                    {paying
+                      ? 'Paid by card through Stripe; you get a receipt by email.'
+                      : mail?.price_note || 'The mailing service charges per letter; the site admin covers or splits the cost.'}{' '}
+                    Your unit can mail{' '}
                     {mailLeft} more {mailLeft === 1 ? 'letter' : 'letters'} this month.
                   </p>
                   {emailOn && <EmailCopyOption on={copyByEmail} set={setCopyByEmail} mail={mail!} test={mail!.test} />}
                   <div className="row">
-                    <button className="btn primary" disabled={busy || mailLeft === 0} onClick={() => { setError(''); setReviewing(true) }}>
+                    <button className="btn primary" disabled={busy || mailLeft === 0 || !canMail} onClick={() => { setError(''); setReviewing(true) }}>
                       Review before sending <Icon name="send" />
                     </button>
                     <button className="btn ghost" onClick={() => setPanel(null)}>Cancel</button>
@@ -503,6 +578,8 @@ export default function RequestDetail() {
                   unit={profile.unit_id}
                   mail={mail}
                   emailCopy={emailOn && copyByEmail}
+                  paying={paying}
+                  price={priceOf(tier)}
                   busy={busy}
                   error={error}
                   onBack={() => setReviewing(false)}
