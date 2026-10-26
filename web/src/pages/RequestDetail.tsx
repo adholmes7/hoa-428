@@ -388,8 +388,13 @@ export default function RequestDetail() {
                     The mailing service (Lob) prints this letter and mails it by USPS to {association.care_of}, {association.street},{' '}
                     {association.city_state_zip}. USPS scans appear in the history automatically, and the deadline updates with them.
                   </p>
-                  {mail?.test && (
+                  {mail?.test ? (
                     <div className="notice warn">Test mode: the service will accept this letter but won't actually mail it.</div>
+                  ) : (
+                    <div className="notice bad">
+                      <b>Live:</b> this mails a real letter through USPS and charges the site's Lob account about $
+                      {MAIL_TIERS[tier].price.toFixed(2)}.
+                    </div>
                   )}
                   <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
                     <legend className="field" style={{ marginBottom: 6, fontSize: '0.88rem', fontWeight: 500, color: 'var(--ink-2)' }}>
@@ -422,7 +427,15 @@ export default function RequestDetail() {
                     {mailLeft} more {mailLeft === 1 ? 'letter' : 'letters'} this month.
                   </p>
                   <div className="row">
-                    <button className="btn primary" disabled={busy || mailLeft === 0} onClick={sendViaService}>
+                    <button
+                      className="btn primary"
+                      style={{ whiteSpace: 'normal', textAlign: 'center', height: 'auto' }}
+                      disabled={busy || mailLeft === 0}
+                      onClick={() => {
+                        const m = MAIL_TIERS[tier]
+                        if (mail?.test || confirm(`Mail this letter for real by ${m.label}? About $${m.price.toFixed(2)} will be charged.`)) sendViaService()
+                      }}
+                    >
                       {busy ? 'Sending…' : `Send by ${MAIL_TIERS[tier].label} (~$${MAIL_TIERS[tier].price.toFixed(2)})`}
                     </button>
                     <button className="btn ghost" onClick={() => setPanel(null)}>Cancel</button>
