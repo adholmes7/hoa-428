@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AiUsage } from '../components/AiUsage'
+import { MailLog } from '../components/MailLog'
 import { DEFAULT_ASSOCIATION, useAssociation, useAuth, useProfile, type Association } from '../lib/auth'
 import { fmtDate } from '../lib/format'
 import { downloadBytes, letterPdf, mergePdfs } from '../lib/pdf'
@@ -213,6 +214,8 @@ export default function Admin() {
 
       <AiUsage members={members} />
 
+      <MailLog />
+
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Where letters go</h2>
         <p className="ink2" style={{ margin: 0 }}>The Association's official address for written communications (Civ. Code §4035), from the 2026 annual policy statement.</p>
@@ -224,12 +227,12 @@ export default function Admin() {
             </label>
           ))}
         </div>
-        <h3 style={{ margin: '8px 0 0' }}>Certified mail service</h3>
-        <label className="check">
-          <input type="checkbox" checked={mail.enabled} onChange={(e) => setMail({ ...mail, enabled: e.target.checked })} />
-          <span>Show the “Mail it as Certified Mail for me” button. This needs the Lob API key set on the server (see the README).</span>
-        </label>
-        <label className="field">Cost note shown to owners<input value={mail.price_note} onChange={(e) => setMail({ ...mail, price_note: e.target.value })} placeholder="e.g. About $8 per letter, covered by the owners' fund" /></label>
+        <h3 style={{ margin: '8px 0 0' }}>Mailing service (Lob)</h3>
+        <p className="ink2" style={{ margin: 0, fontSize: '0.92rem' }}>
+          The "Mail it for me" button appears on draft requests once the Lob API key is set on the server (see the README). Owners choose
+          first-class (~$1.16), Certified (~$8.11), or Certified with return receipt (~$11.02), charged to the Lob account.
+        </p>
+        <label className="field">Cost note shown to owners<input value={mail.price_note} onChange={(e) => setMail({ ...mail, price_note: e.target.value })} placeholder="e.g. Charged to the owners' fund; please mail only letters you're ready to send." /></label>
         <div><button className="btn primary" onClick={saveSettings}>Save settings</button></div>
       </div>
     </>

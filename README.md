@@ -21,7 +21,7 @@ Only owners can get in. Each unit gets a hand-delivered letter with a unique cod
 | Website (static React app) | GitHub Pages, your domain | Free (domain about $12/yr) |
 | Accounts, database, file storage, live chat | Supabase free tier | Free |
 | AI assistant | Claude Haiku 5.5 via the Anthropic API (or any OpenAI-compatible API) | About $0.001 per question |
-| Certified mail (optional) | Lob | About $6–9 per letter |
+| Mailing letters (optional) | Lob | ~$1.16 first-class, ~$8.11 certified, ~$11.02 with return receipt |
 | Login emails (recommended) | Resend free tier as SMTP | Free |
 
 The code in this repository is safe to make public. **HOA documents never go into the repository.** They live in Supabase storage behind owner-only access and are loaded from the `private-data/` folder, which git ignores. Records obtained as a member can't be published (Civ. Code §5230).
@@ -124,25 +124,35 @@ Each owner gets 20 questions a day (`AI_DAILY_LIMIT`). Claude Haiku 5.5 costs ab
    - Under **Invite letters**, select the units (unit numbers default to 1–22; edit `scripts/seed.mjs` if the building numbers differ), check the website address, and generate. You get one PDF with a letter per unit to print and hand-deliver. Codes are shown once; only their hash is stored. Each code works for up to 3 people in that unit.
 4. When a unit sells, pause the old accounts in Admin and generate a new code for that unit.
 
-### 6. Optional: Certified Mail through Lob
+### 6. Mailing letters through Lob
 
-1. Create an account at [lob.com](https://lob.com). Start with the **test** API key: Lob accepts letters but doesn't mail them.
+With a Lob key set, draft requests get a **Mail it for me** button. Lob prints the letter and mails it by USPS; owners pick the service on each letter, and the site recommends one per request type:
+
+| Service | Cost (Lob Developer plan) | Deadline tracking |
+|---|---|---|
+| First-class mail | ~$1.16 | Valid notice under CC&R §14.12; deadline estimated from USPS scans |
+| Certified Mail | ~$8.11 | Exact: the USPS delivery date starts the clock |
+| Certified + electronic return receipt | ~$11.02 | Exact, plus the signer's signature as proof |
+
+Flooring/architectural requests can't go first-class (CC&R §7.3 requires certified mail). Each unit can mail 4 letters a month through the service (`MAIL_MONTHLY_LIMIT`). The exact PDF that was mailed is saved on the request, and **Admin → Letters mailed by the site** lists every letter with its estimated cost.
+
+1. Create an account at [lob.com](https://lob.com) and add a payment method. Start with the **test** API key: Lob accepts letters but doesn't mail them.
 2. Set the key:
 
    ```bash
    npx supabase secrets set LOB_API_KEY=test_xxx
    ```
 
-3. In the Lob dashboard, add a webhook to `https://YOUR-PROJECT.supabase.co/functions/v1/lob-webhook` for the `letter.certified.*` events, then:
+3. In the Lob dashboard, add a webhook to `https://YOUR-PROJECT.supabase.co/functions/v1/lob-webhook`, subscribed to the letter tracking events (the certified ones and the regular ones: mailed, in transit, in local area, processed for delivery, re-routed, returned to sender, delivered, pickup available, issue). Then store its secret:
 
    ```bash
    npx supabase secrets set LOB_WEBHOOK_SECRET=the-webhook-secret
    ```
 
-4. In **Admin → Certified mail service**, turn on the button and add a cost note.
-5. Send one test letter, check it in the Lob dashboard, then switch to the live key.
+4. Send a test letter from the site and check it in the Lob dashboard. Test-mode letters don't produce tracking events; use the dashboard's webhook Debugger to send sample events.
+5. Switch to the live key (`LOB_API_KEY=live_xxx`).
 
-Lob puts an address cover page in front of the letter (`insert_blank_page`), so each letter has one extra page. Without Lob, owners can mail at the post office or upload the PDF to an online certified-mail service, then type the tracking number into the site.
+How tracking moves the deadline: on sending, the deadline is estimated from Lob's expected delivery date; USPS's "Mailed" scan re-estimates it from the real mailing date; a certified "Delivered" scan records the HOA's receipt date and sets the exact deadline. First-class mail never gets a delivery scan, so its "Processed for delivery" scan becomes the estimated receipt date.
 
 ## Running it locally
 

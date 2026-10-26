@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { computeDeadline, METHODS, requestType, todayISO, urgency, type Method } from '@shared/deadlines.ts'
+import { computeDeadline, MAIL_TIERS, METHODS, requestType, todayISO, urgency, type MailTier, type Method } from '@shared/deadlines.ts'
 import { Attachments } from '../components/Attachments'
 import { Icon } from '../components/Icon'
 import { StatusBadge } from '../components/RequestBits'
-import { useAssociation, useAuth, useProfile } from '../lib/auth'
+import { useAssociation, useProfile } from '../lib/auth'
 import { dueText, fmtDate, fmtDateTime, uspsTrackingUrl } from '../lib/format'
 import { letterSubject } from '../lib/letters'
 import { bytesToBase64, downloadBytes, letterPdf } from '../lib/pdf'
 import { errMsg, supabase, type RequestEvent, type RequestRow } from '../lib/supabase'
 
 type Panel = null | 'sent' | 'received' | 'answered' | 'deemed' | 'note' | 'mail'
+type MailStatus = { enabled: boolean; test: boolean; limit: number; used: number; price_note: string }
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Draft created',
@@ -31,7 +32,6 @@ export default function RequestDetail() {
   const { id } = useParams()
   const nav = useNavigate()
   const profile = useProfile()
-  const { settings } = useAuth()
   const association = useAssociation()
   const [r, setR] = useState<RequestRow | null>(null)
   const [events, setEvents] = useState<RequestEvent[]>([])
@@ -48,6 +48,8 @@ export default function RequestDetail() {
   const [editing, setEditing] = useState(false)
   const [letterDraft, setLetterDraft] = useState('')
   const [returnAddress, setReturnAddress] = useState(profile.mailing_address ?? '')
+  const [mail, setMail] = useState<MailStatus | null>(null)
+  const [tier, setTier] = useState<MailTier>('certified')
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('requests').select('*').eq('id', id).maybeSingle()
@@ -63,13 +65,26 @@ export default function RequestDetail() {
     load()
   }, [load])
 
+  // Whether the site can mail letters (a Lob key is configured) and this unit's monthly usage
+  useEffect(() => {
+    supabase.functions.invoke('send-letter', { body: { status: true } }).then(({ data }) => {
+      if (data && typeof data.enabled === 'boolean') setMail(data as MailStatus)
+    })
+  }, [])
+
+  useEffect(() => {
+    const rt = r ? requestType(r.type) : undefined
+    if (rt) setTier(rt.mailTier)
+  }, [r?.type]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (notFound) return <div className="empty"><h3>Request not found</h3><Link to="/requests">Back to requests</Link></div>
   if (!r) return <div className="empty">Loading…</div>
 
   const t = requestType(r.type)
   const canEdit = r.unit_id === profile.unit_id
   const u = urgency(r.status, r.due_date)
-  const mailEnabled = Boolean((settings.mail_service as { enabled?: boolean } | undefined)?.enabled)
+  const mailEnabled = Boolean(mail?.enabled)
+  const mailLeft = mail ? Math.max(0, mail.limit - mail.used) : 0
 
   async function update(patch: Partial<RequestRow>, eventKind: string, eventNote?: string) {
     setBusy(true)
@@ -138,11 +153,16 @@ export default function RequestDetail() {
     try {
       const bytes = await pdf()
       const { data, error } = await supabase.functions.invoke('send-letter', {
-        body: { request_id: r!.id, pdf_base64: bytesToBase64(bytes), return_address: returnAddress },
+        body: { request_id: r!.id, pdf_base64: bytesToBase64(bytes), return_address: returnAddress, service: tier },
       })
-      if (error) throw error
+      if (error) {
+        const ctx = (error as { context?: Response }).context
+        const detail = ctx && typeof ctx.json === 'function' ? await ctx.json().catch(() => null) : null
+        throw new Error(detail?.error ?? error.message)
+      }
       if (data?.error) throw new Error(data.error)
       setPanel(null)
+      setMail((m) => (m ? { ...m, used: m.used + 1 } : m))
       await load()
     } catch (e) {
       setError(errMsg(e))
@@ -277,7 +297,7 @@ export default function RequestDetail() {
                     </button>
                     {mailEnabled && (
                       <button className="btn" onClick={() => setPanel('mail')}>
-                        <Icon name="truck" /> Mail it as Certified Mail for me
+                        <Icon name="truck" /> Mail it for me
                       </button>
                     )}
                     <button className="btn danger ghost" onClick={deleteDraft}>
@@ -365,19 +385,46 @@ export default function RequestDetail() {
               {panel === 'mail' && (
                 <div className="stack card" style={{ background: 'var(--surface-2)' }}>
                   <p style={{ margin: 0 }}>
-                    We'll send the PDF to the mailing service. It prints the letter and sends it by <b>USPS Certified Mail with
-                    electronic return receipt</b> to {association.care_of}, {association.street}, {association.city_state_zip}.
-                    Tracking appears here automatically.
+                    The mailing service (Lob) prints this letter and mails it by USPS to {association.care_of}, {association.street},{' '}
+                    {association.city_state_zip}. USPS scans appear in the history automatically, and the deadline updates with them.
                   </p>
+                  {mail?.test && (
+                    <div className="notice warn">Test mode: the service will accept this letter but won't actually mail it.</div>
+                  )}
+                  <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
+                    <legend className="field" style={{ marginBottom: 6, fontSize: '0.88rem', fontWeight: 500, color: 'var(--ink-2)' }}>
+                      How to mail it
+                    </legend>
+                    {(Object.keys(MAIL_TIERS) as MailTier[]).map((k) => {
+                      const m = MAIL_TIERS[k]
+                      const blocked = k === 'first_class' && t?.requiresCertified
+                      return (
+                        <label key={k} className="check card" style={{ padding: '10px 12px', opacity: blocked ? 0.55 : 1, cursor: blocked ? 'not-allowed' : 'pointer' }}>
+                          <input type="radio" name="tier" checked={tier === k} disabled={blocked} onChange={() => setTier(k)} />
+                          <span>
+                            <b>{m.label}</b> · about ${m.price.toFixed(2)}
+                            {t?.mailTier === k && <span className="badge brand" style={{ marginLeft: 8 }}>Recommended for this request</span>}
+                            <br />
+                            <span className="muted" style={{ fontSize: '0.85rem' }}>
+                              {blocked ? 'Not allowed here: CC&R §7.3 requires certified mail or personal delivery.' : `${m.summary} ${m.deadlines}`}
+                            </span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </fieldset>
                   <label className="field">
                     Return address
                     <textarea style={{ minHeight: 70 }} value={returnAddress} onChange={(e) => setReturnAddress(e.target.value)} placeholder={`Your name\n428 Hill Street, Unit ${profile.unit_id}\nSanta Monica, CA 90405`} />
                   </label>
                   <p className="muted" style={{ fontSize: '0.85rem', margin: 0 }}>
-                    {String((settings.mail_service as { price_note?: string } | undefined)?.price_note ?? 'The mailing service charges per letter; the site admin covers or splits the cost.')}
+                    {mail?.price_note || 'The mailing service charges per letter; the site admin covers or splits the cost.'} Your unit can mail{' '}
+                    {mailLeft} more {mailLeft === 1 ? 'letter' : 'letters'} this month.
                   </p>
                   <div className="row">
-                    <button className="btn primary" disabled={busy} onClick={sendViaService}>{busy ? 'Sending…' : 'Send Certified Mail'}</button>
+                    <button className="btn primary" disabled={busy || mailLeft === 0} onClick={sendViaService}>
+                      {busy ? 'Sending…' : `Send by ${MAIL_TIERS[tier].label} (~$${MAIL_TIERS[tier].price.toFixed(2)})`}
+                    </button>
                     <button className="btn ghost" onClick={() => setPanel(null)}>Cancel</button>
                   </div>
                 </div>
@@ -489,7 +536,7 @@ export default function RequestDetail() {
               {events.map((e) => (
                 <li key={e.id}>
                   <div className="when">{fmtDateTime(e.at)}</div>
-                  <div><b>{EVENT_LABEL[e.kind] ?? e.kind}</b>{e.note ? ` — ${e.note}` : ''}</div>
+                  <div><b>{EVENT_LABEL[e.kind] ?? e.kind}</b>{e.note ? ` — ${e.note.replace(/\s*\[[^\]]*\]$/, '')}` : ''}</div>
                 </li>
               ))}
             </ul>

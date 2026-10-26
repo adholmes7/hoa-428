@@ -31,7 +31,34 @@ export interface RequestType {
   verify?: boolean;
   /** Start the request as private to the unit (e.g. replies with other owners' personal details) */
   defaultPrivate?: boolean;
+  /** Suggested tier when the site mails the letter */
+  mailTier: MailTier;
+  /** The governing documents require certified mail or personal delivery */
+  requiresCertified?: boolean;
 }
+
+export type MailTier = "first_class" | "certified" | "certified_rr";
+
+export const MAIL_TIERS: Record<MailTier, { label: string; price: number; summary: string; deadlines: string }> = {
+  first_class: {
+    label: "First-class mail",
+    price: 1.16,
+    summary: "Valid notice under CC&R §14.12 (delivery is complete when mailed). USPS scans show it moving, but there's no delivery confirmation.",
+    deadlines: "The deadline is estimated from the last USPS scan, not a confirmed delivery date.",
+  },
+  certified: {
+    label: "Certified Mail",
+    price: 8.11,
+    summary: "USPS records the exact delivery date, which starts the HOA's clock. Good for any request with a legal deadline.",
+    deadlines: "The deadline is set exactly when USPS confirms delivery.",
+  },
+  certified_rr: {
+    label: "Certified Mail + electronic return receipt",
+    price: 11.02,
+    summary: "Adds a copy of the signature of whoever signed for it. Strongest proof, for letters that may end up in mediation or court.",
+    deadlines: "The deadline is set exactly when USPS confirms delivery.",
+  },
+};
 
 export const REQUEST_TYPES: RequestType[] = [
   {
@@ -47,6 +74,7 @@ export const REQUEST_TYPES: RequestType[] = [
     ifMissed:
       "You may sue in small claims court to enforce the right to inspect (Civ. Code §5235). The court can award a civil penalty of up to $500 per written request that was unreasonably denied, plus costs.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
   },
   {
     id: "records_prior",
@@ -59,6 +87,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: "statutory",
     ifMissed: "Same remedies as a current-year request: small claims action and civil penalties (Civ. Code §5235).",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
   },
   {
     id: "minutes",
@@ -72,6 +101,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: "statutory",
     ifMissed: "Treated as a records request: small claims action under Civ. Code §5235.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
   },
   {
     id: "membership_list",
@@ -88,6 +118,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deliveryNote:
       "The request must be in writing and state your purpose, which must relate to your interests as a member (Corp. Code §8330). The list may only be used for that kind of purpose: no selling it and no commercial use (Corp. Code §8338).",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
     defaultPrivate: true,
   },
   {
@@ -103,6 +134,7 @@ export const REQUEST_TYPES: RequestType[] = [
     ifMissed:
       "No separate statutory deadline; the policies are association records, so treat a non-response as a records-request denial.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
   },
   {
     id: "maintenance",
@@ -117,6 +149,7 @@ export const REQUEST_TYPES: RequestType[] = [
     ifMissed:
       "No fixed deadline. A dated written notice builds the record that the Board knew. Follow up, then consider meet and confer (CC&R §12.5).",
     recommendedMethod: "certified",
+    mailTier: "first_class",
   },
   {
     id: "meet_confer",
@@ -132,6 +165,7 @@ export const REQUEST_TYPES: RequestType[] = [
       "Deemed denied under CC&R §12.5(b)(ii), but the Association is not permitted to refuse, so a missed deadline is itself a violation. Next step: Request for Resolution (ADR).",
     deliveryNote: "Serve it under CC&R §14.12: personal delivery or first-class mail. Email counts only if the Board agreed to email in writing.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified_rr",
   },
   {
     id: "adr_request",
@@ -147,6 +181,7 @@ export const REQUEST_TYPES: RequestType[] = [
       "Deemed rejected (Civ. Code §5935(c)). If accepted, ADR must be completed within 90 days. Serving the request tolls the statute of limitations (§5945).",
     deliveryNote: "Civ. Code §5935(b): personal delivery, first-class mail, express mail, fax, or other means reasonably calculated to give actual notice.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified_rr",
   },
   {
     id: "architectural",
@@ -162,6 +197,8 @@ export const REQUEST_TYPES: RequestType[] = [
     deliveryNote:
       "CC&R §7.3 requires personal delivery or certified mail to the Secretary (or Architectural Committee chair). Get a written, dated receipt.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified_rr",
+    requiresCertified: true,
   },
   {
     id: "architectural_appeal",
@@ -174,6 +211,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: "ccr",
     ifMissed: "If the Board does not decide in writing within 30 days, the appeal is deemed decided in your favor (CC&R §7.8).",
     recommendedMethod: "certified_rr",
+    mailTier: "certified_rr",
   },
   {
     id: "estoppel",
@@ -187,6 +225,7 @@ export const REQUEST_TYPES: RequestType[] = [
     ifMissed: "Follow up in writing; consider meet and confer (CC&R §12.5).",
     deliveryNote: "Requires a written demand plus any fee the Board has set.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
   },
   {
     id: "lease",
@@ -199,6 +238,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: "ccr",
     ifMissed: "Permission is deemed granted if no response reaches your address of record within 10 days.",
     recommendedMethod: "certified_rr",
+    mailTier: "certified",
   },
   {
     id: "seller_docs",
@@ -211,6 +251,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: "statutory",
     ifMissed: "The association may not withhold the documents except for permitted fees; it can be liable for damages and a civil penalty.",
     recommendedMethod: "email_copy",
+    mailTier: "certified",
   },
   {
     id: "special_meeting",
@@ -226,6 +267,7 @@ export const REQUEST_TYPES: RequestType[] = [
       "If the Board does not give notice within 20 days, the petitioners may give notice themselves or seek a court order (Corp. Code §7510(e)). The meeting must be 35–90 days after the petition.",
     verify: true,
     recommendedMethod: "certified_rr",
+    mailTier: "certified_rr",
   },
   {
     id: "general",
@@ -238,6 +280,7 @@ export const REQUEST_TYPES: RequestType[] = [
     deadlineKind: null,
     ifMissed: "",
     recommendedMethod: "first_class",
+    mailTier: "first_class",
   },
 ];
 
