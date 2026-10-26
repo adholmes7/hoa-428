@@ -1,12 +1,15 @@
 // Owner assistant: answers questions from the CC&Rs and HOA documents and suggests requests.
 //
-// Works with any OpenAI-compatible chat API. Configure with secrets:
+// Claude (recommended): AI_PROVIDER=anthropic, ANTHROPIC_API_KEY, AI_MODEL (default claude-haiku-5-5).
+//
+// Or any OpenAI-compatible chat API. Configure with secrets:
 //   AI_API_KEY   (required)
 //   AI_BASE_URL  default https://generativelanguage.googleapis.com/v1beta/openai  (Google Gemini, free tier)
 //   AI_MODEL     default gemini-flash-latest; may be a comma-separated list (fallbacks, OpenRouter only)
 //   AI_DAILY_LIMIT  questions per owner per day, default 40
 // Set AI_PROVIDER=mock to test without a key (returns the retrieved passages).
 
+import Anthropic from "npm:@anthropic-ai/sdk@0.133.0";
 import { REQUEST_TYPES } from "../_shared/deadlines.ts";
 import { adminClient, cors, json, requireOwner } from "../_shared/http.ts";
 
@@ -44,6 +47,44 @@ function extractSuggest(text: string) {
     /* ignore malformed */
   }
   return { answer: text.replace(m[0], "").trim(), suggest };
+}
+
+async function askClaude(messages: Msg[], passages: string): Promise<{ text: string } | { error: string }> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) return { error: "The assistant isn't set up yet. An admin needs to add the Anthropic API key (see the README)." };
+  const client = new Anthropic({ apiKey, timeout: 45_000, maxRetries: 1 });
+
+  // The API requires the conversation to start with a user turn
+  const firstUser = messages.findIndex((m) => m.role === "user");
+  const history: Anthropic.MessageParam[] = messages.slice(firstUser).map((m) => ({ role: m.role, content: m.content }));
+
+  try {
+    const response = await client.messages.create({
+      model: Deno.env.get("AI_MODEL") ?? "claude-haiku-5-5",
+      max_tokens: 8000,
+      system: [
+        // Stable instructions first and cached; the per-question passages come after the breakpoint
+        { type: "text", text: `${RULES}\n\nSITE GUIDE:${SITE_GUIDE}`, cache_control: { type: "ephemeral" } },
+        { type: "text", text: `PASSAGES:\n\n${passages || "(no matching passages found)"}` },
+      ],
+      messages: history,
+    });
+    if (response.stop_reason === "refusal") {
+      return { error: "The assistant can't help with that question. Try rephrasing it, or check the CC&Rs directly." };
+    }
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+    return text ? { text } : { error: "The assistant returned an empty answer. Please try again." };
+  } catch (error) {
+    console.error("Claude API error", error);
+    if (error instanceof Anthropic.AuthenticationError) return { error: "The Anthropic API key was rejected. An admin needs to check it." };
+    if (error instanceof Anthropic.RateLimitError) return { error: "The assistant is busy right now. Try again in a minute." };
+    if (error instanceof Anthropic.APIError) return { error: `The AI service returned an error (${error.status}): ${error.message}` };
+    return { error: "Couldn't reach the AI service. Try again in a minute." };
+  }
 }
 
 Deno.serve(async (req) => {
@@ -94,6 +135,10 @@ Deno.serve(async (req) => {
       text = `(Test mode: no AI key configured.) I found ${ctx.length} relevant passages: ${
         ctx.map((c) => (c.kind === "ccr" ? `§${c.ref}` : c.title)).join(", ")
       }.`;
+    } else if (Deno.env.get("AI_PROVIDER") === "anthropic") {
+      const result = await askClaude(messages, passages);
+      if ("error" in result) return json({ error: result.error }, 502);
+      text = result.text;
     } else {
       const key = Deno.env.get("AI_API_KEY");
       if (!key) return json({ error: "The assistant isn't set up yet. An admin needs to add an AI API key (see the README)." }, 503);

@@ -20,7 +20,7 @@ Only owners can get in. Each unit gets a hand-delivered letter with a unique cod
 |---|---|---|
 | Website (static React app) | GitHub Pages, your domain | Free (domain about $12/yr) |
 | Accounts, database, file storage, live chat | Supabase free tier | Free |
-| AI assistant | Google Gemini API free tier (any OpenAI-compatible API works; default model `gemini-flash-latest`) | Free |
+| AI assistant | Claude Haiku 5.5 via the Anthropic API (or any OpenAI-compatible API) | About $0.001 per question |
 | Certified mail (optional) | Lob | About $6–9 per letter |
 | Login emails (recommended) | Resend free tier as SMTP | Free |
 
@@ -90,13 +90,13 @@ npx supabase functions deploy send-letter
 npx supabase functions deploy lob-webhook --no-verify-jwt
 ```
 
-**AI assistant (free):** get an API key at [aistudio.google.com](https://aistudio.google.com/apikey), then:
+**AI assistant:** create an API key in the [Anthropic Console](https://console.anthropic.com) (Settings → API Keys; add a little prepaid credit under Billing), then:
 
 ```bash
-npx supabase secrets set AI_API_KEY=your-gemini-key
+npx supabase secrets set AI_PROVIDER=anthropic AI_MODEL=claude-haiku-5-5 ANTHROPIC_API_KEY=your-key
 ```
 
-Each owner gets 40 questions a day (`AI_DAILY_LIMIT`). To use a different provider, set `AI_BASE_URL` and `AI_MODEL` to any OpenAI-compatible endpoint: for example Groq (free tier), or Anthropic's Claude (paid, not used for training) at `https://api.anthropic.com/v1/` with `AI_MODEL=claude-haiku-5-5`. Note: on Google's free tier, Google may use prompts to improve its products. The CC&Rs are recorded public documents, but tell owners not to paste private details into the assistant, or switch to a paid provider.
+Each owner gets 20 questions a day (`AI_DAILY_LIMIT`). Claude Haiku 5.5 costs about a tenth of a cent per question here, and Anthropic doesn't train on API data. To use an OpenAI-compatible provider instead (OpenRouter, Groq, Gemini), unset `AI_PROVIDER` and set `AI_BASE_URL`, `AI_MODEL` (comma-separated fallbacks allowed) and `AI_API_KEY`.
 
 ### 4. Website on GitHub Pages
 
