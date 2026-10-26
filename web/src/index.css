@@ -425,3 +425,6 @@ a.item:hover { background: var(--surface-2); border-radius: 8px; }
 .msg-actions .react-chip.add, .msg-actions > .btn { opacity: 0; transition: opacity 0.12s; }
 .msg:hover .msg-actions .react-chip.add, .msg:hover .msg-actions > .btn, .msg-actions :focus-visible, .msg-actions [aria-expanded='true'] { opacity: 1; }
 @media (hover: none) { .msg-actions .react-chip.add, .msg-actions > .btn { opacity: 1; } }
+/* Signature drawn on the letter's signature line in the preview */
+.letter-sig { position: relative; display: inline-block; }
+.letter-sig img { position: absolute; left: 4px; bottom: 0.55em; height: 2.6em; max-width: 13em; object-fit: contain; object-position: left bottom; pointer-events: none; }
