@@ -248,6 +248,7 @@ Deno.serve(async (req) => {
         pdf,
         howSent: howSentText(service.label, sentDate, out.tracking_number),
         test,
+        letterText: r.letter_body,
         actorId: user.id,
       });
     }

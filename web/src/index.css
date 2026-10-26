@@ -468,3 +468,4 @@ a.item:hover { background: var(--surface-2); border-radius: 8px; }
   .review-scroll { padding: 14px 16px; }
   .envelope { grid-template-columns: 1fr; }
 }
+.email-details .email-body { max-height: 50vh; overflow-y: auto; }

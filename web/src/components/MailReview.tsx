@@ -97,6 +97,7 @@ export function MailReview(p: ReviewProps) {
         hoa: p.mail.email?.hoa ?? [],
         howSent: howSentText(m.label, '[mailing date set by Lob]', certified ? '[USPS tracking number]' : null),
         test,
+        letterText: p.letter,
       })
     : null
 

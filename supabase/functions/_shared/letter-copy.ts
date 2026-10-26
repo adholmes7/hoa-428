@@ -17,6 +17,7 @@ export type LetterCopyInput = {
   hoa: string[];
   howSent: string; // e.g. "Certified Mail via USPS, mailing 2026-10-27 (tracking 9407...)"
   test: boolean;
+  letterText?: string | null; // the letter itself, quoted in the email for reference
 };
 
 export type LetterCopy = { to: string[]; cc: string[]; replyTo: string[]; subject: string; text: string; attachment: string };
@@ -50,7 +51,7 @@ export function composeLetterCopy(c: LetterCopyInput): LetterCopy {
     cc,
     replyTo: owner,
     subject: `${c.test ? "[TEST, not mailed] " : ""}${c.subject} (Unit owner request #${c.refNo})`.slice(0, 250),
-    text: [...lines, "", "Sent from the 428 Hill Street owners' portal."].join("\n"),
+    text: [...lines, ...quoteLetter(c.letterText), "", "Sent from the 428 Hill Street owners' portal."].join("\n"),
     attachment: `request-${c.refNo}.pdf`,
   };
 }
@@ -67,4 +68,15 @@ export function howSentText(label: string, date?: string | null, tracking?: stri
 export function envelopeTo(a: { name: string; care_of: string; street: string; city_state_zip: string }) {
   const company = a.name.length <= 40 ? a.name : a.name.replace(/\s*Homeowners'? Association$/i, " HOA").slice(0, 40);
   return { name: `Board of Directors${a.care_of ? `, ${a.care_of}` : ""}`.slice(0, 40), company, street: a.street, cityStateZip: a.city_state_zip };
+}
+
+// The letter text below the note, so it can be read without opening the PDF (the PDF stays attached as the signed copy)
+function quoteLetter(letter?: string | null): string[] {
+  const body = (letter ?? "")
+    .replace(/\f/g, "\n")
+    .replace(/^\s*_{10,}\s*$/m, "[Signature: see the attached PDF]")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!body) return [];
+  return ["", "The letter's text is below for reference. The attached PDF is the signed copy that was mailed.", "", "---------- Letter ----------", "", body, "", "---------- End of letter ----------"];
 }

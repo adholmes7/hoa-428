@@ -418,6 +418,7 @@ export default function RequestDetail() {
                           hoa: mail!.email?.hoa ?? [],
                           howSent: `${METHODS[method].label} on ${date}${tracking.trim() ? ` (tracking ${tracking.trim()})` : ''}`,
                           test: false,
+                          letterText: r.letter_body,
                         })}
                       />
                     </details>

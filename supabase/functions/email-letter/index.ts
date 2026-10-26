@@ -35,6 +35,7 @@ Deno.serve(async (req) => {
       pdf,
       howSent: `${how}${r.sent_date ? ` on ${r.sent_date}` : ""}${r.tracking_number ? ` (tracking ${r.tracking_number})` : ""}`,
       test: false,
+      letterText: r.letter_body,
       actorId: user.id,
     });
     return result.ok ? json(result) : json({ error: result.error }, 502);
