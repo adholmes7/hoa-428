@@ -3,7 +3,7 @@
 // Works with any OpenAI-compatible chat API. Configure with secrets:
 //   AI_API_KEY   (required)
 //   AI_BASE_URL  default https://generativelanguage.googleapis.com/v1beta/openai  (Google Gemini, free tier)
-//   AI_MODEL     default gemini-flash-latest (Google's alias for its current Flash model)
+//   AI_MODEL     default gemini-flash-latest; may be a comma-separated list (fallbacks, OpenRouter only)
 //   AI_DAILY_LIMIT  questions per owner per day, default 40
 // Set AI_PROVIDER=mock to test without a key (returns the retrieved passages).
 
@@ -98,7 +98,10 @@ Deno.serve(async (req) => {
       const key = Deno.env.get("AI_API_KEY");
       if (!key) return json({ error: "The assistant isn't set up yet. An admin needs to add an AI API key (see the README)." }, 503);
       const base = (Deno.env.get("AI_BASE_URL") ?? "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/$/, "");
-      const model = Deno.env.get("AI_MODEL") ?? "gemini-flash-latest";
+      // AI_MODEL may list fallbacks, comma-separated; OpenRouter tries them in order if one is unavailable
+      const models = (Deno.env.get("AI_MODEL") ?? "gemini-flash-latest").split(",").map((m) => m.trim()).filter(Boolean);
+      const model = models[0];
+      const fallbacks = base.includes("openrouter.ai") && models.length > 1 ? { models } : {};
       const chatMessages = [
         { role: "system", content: `${RULES}\n\nSITE GUIDE:${SITE_GUIDE}` },
         { role: "system", content: `PASSAGES:\n\n${passages || "(no matching passages found)"}` },
@@ -108,7 +111,7 @@ Deno.serve(async (req) => {
         fetch(`${base}/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ model, messages: chatMessages, ...params }),
+          body: JSON.stringify({ model, messages: chatMessages, ...fallbacks, ...params }),
         });
       let res = await call({ temperature: 0.2, max_tokens: 1200 });
       // Newer OpenAI models reject temperature and max_tokens; retry once with the parameters they accept
@@ -119,7 +122,9 @@ Deno.serve(async (req) => {
       if (!res.ok) {
         const detail = await res.text();
         console.error("AI provider error", res.status, detail.slice(0, 500));
-        if (res.status === 429) return json({ error: "The free AI quota is used up for now. Try again in a minute." }, 502);
+        if (res.status === 429) {
+          return json({ error: "The site's free AI allowance is used up for now (it's shared by all owners). Try again later or tomorrow." }, 502);
+        }
         // Pass the provider's own message through (it never contains the key) so setup problems are diagnosable
         let reason = "";
         try {
