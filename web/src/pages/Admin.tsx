@@ -222,7 +222,7 @@ export default function Admin() {
         <div className="grid grid-2">
           {(Object.keys(DEFAULT_ASSOCIATION) as (keyof Association)[]).map((k) => (
             <label key={k} className="field">
-              {{ name: 'Association name', care_of: 'Care of', attn: 'Attention', street: 'Street', city_state_zip: 'City, state, ZIP', email: 'Manager email (for email copies)' }[k]}
+              {{ name: 'Association name', care_of: 'Care of', attn: 'Attention', street: 'Street', city_state_zip: 'City, state, ZIP', email: 'Manager email (for email copies)', board_email: 'Board email(s) for email copies, comma-separated' }[k]}
               <input value={a[k]} onChange={(e) => setA({ ...a, [k]: e.target.value })} />
             </label>
           ))}

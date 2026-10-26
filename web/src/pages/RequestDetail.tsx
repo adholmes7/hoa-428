@@ -12,7 +12,14 @@ import { bytesToBase64, downloadBytes, letterPdf } from '../lib/pdf'
 import { errMsg, supabase, type RequestEvent, type RequestRow } from '../lib/supabase'
 
 type Panel = null | 'sent' | 'received' | 'answered' | 'deemed' | 'note' | 'mail'
-type MailStatus = { enabled: boolean; test: boolean; limit: number; used: number; price_note: string }
+type MailStatus = {
+  enabled: boolean
+  test: boolean
+  limit: number
+  used: number
+  price_note: string
+  email?: { enabled: boolean; hoa: string[]; owner: string | null }
+}
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'Draft created',
@@ -52,6 +59,7 @@ export default function RequestDetail() {
   const [mail, setMail] = useState<MailStatus | null>(null)
   const [tier, setTier] = useState<MailTier>('certified')
   const sig = useSignature()
+  const [copyByEmail, setCopyByEmail] = useState(true)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('requests').select('*').eq('id', id).maybeSingle()
@@ -87,11 +95,12 @@ export default function RequestDetail() {
   const u = urgency(r.status, r.due_date)
   const mailEnabled = Boolean(mail?.enabled)
   const mailLeft = mail ? Math.max(0, mail.limit - mail.used) : 0
+  const emailOn = Boolean(mail?.email?.enabled)
   // Only the owner who drafted the letter can sign it; the letter is in their name
   const isSigner = r.requester_id === profile.id
   const signature = isSigner ? sig.image : null
 
-  async function update(patch: Partial<RequestRow>, eventKind: string, eventNote?: string) {
+  async function update(patch: Partial<RequestRow>, eventKind: string, eventNote?: string): Promise<boolean> {
     setBusy(true)
     setError('')
     const { error } = await supabase.from('requests').update(patch).eq('id', r!.id)
@@ -99,10 +108,14 @@ export default function RequestDetail() {
       await supabase.from('request_events').insert({ request_id: r!.id, kind: eventKind, note: eventNote ?? null, created_by: profile.id })
     }
     setBusy(false)
-    if (error) return setError(errMsg(error))
+    if (error) {
+      setError(errMsg(error))
+      return false
+    }
     setPanel(null)
     setNote('')
     await load()
+    return true
   }
 
   async function pdf() {
@@ -123,9 +136,9 @@ export default function RequestDetail() {
     window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`
   }
 
-  function markSent() {
+  async function markSent() {
     const d = computeDeadline({ type: r!.type, method, sentDate: date })
-    update(
+    const ok = await update(
       {
         status: 'sent',
         method,
@@ -139,6 +152,11 @@ export default function RequestDetail() {
       'sent',
       [METHODS[method].label, tracking.trim() ? `tracking ${tracking.trim()}` : '', note].filter(Boolean).join(' · '),
     )
+    if (ok && emailOn && copyByEmail) {
+      const { data, error } = await supabase.functions.invoke('email-letter', { body: { request_id: r!.id, pdf_base64: bytesToBase64(await pdf()) } })
+      if (error || data?.error) setError(`Saved, but the email copy didn't go out: ${data?.error ?? error?.message}`)
+      await load()
+    }
   }
 
   function markReceived() {
@@ -157,7 +175,7 @@ export default function RequestDetail() {
     try {
       const bytes = await pdf()
       const { data, error } = await supabase.functions.invoke('send-letter', {
-        body: { request_id: r!.id, pdf_base64: bytesToBase64(bytes), return_address: returnAddress, service: tier },
+        body: { request_id: r!.id, pdf_base64: bytesToBase64(bytes), return_address: returnAddress, service: tier, email_copy: emailOn && copyByEmail },
       })
       if (error) {
         const ctx = (error as { context?: Response }).context
@@ -389,6 +407,7 @@ export default function RequestDetail() {
                       return d.dueDate ? `Estimated deadline: ${fmtDate(d.dueDate)}. ${d.explanation}` : d.explanation
                     })()}
                   </p>
+                  {emailOn && <EmailCopyOption on={copyByEmail} set={setCopyByEmail} mail={mail!} test={false} />}
                   <div className="row">
                     <button className="btn primary" disabled={busy} onClick={markSent}>Save</button>
                     <button className="btn ghost" onClick={() => setPanel(null)}>Cancel</button>
@@ -446,6 +465,7 @@ export default function RequestDetail() {
                     {mail?.price_note || 'The mailing service charges per letter; the site admin covers or splits the cost.'} Your unit can mail{' '}
                     {mailLeft} more {mailLeft === 1 ? 'letter' : 'letters'} this month.
                   </p>
+                  {emailOn && <EmailCopyOption on={copyByEmail} set={setCopyByEmail} mail={mail!} test={mail!.test} />}
                   <div className="row">
                     <button
                       className="btn primary"
@@ -620,5 +640,28 @@ function LetterPreview({ text, signature }: { text: string; signature: string | 
       {'\n'}
       {lines.slice(at + 1).join('\n')}
     </div>
+  )
+}
+
+/** Opt-out checkbox for emailing a copy of the letter to the HOA and the owner. */
+function EmailCopyOption({ on, set, mail, test }: { on: boolean; set: (v: boolean) => void; mail: MailStatus; test: boolean }) {
+  const hoa = mail.email?.hoa ?? []
+  const me = mail.email?.owner
+  return (
+    <label className="check">
+      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
+      <span>
+        <b>Email a copy</b> of the letter (PDF) {test ? 'to you only' : hoa.length ? `to the HOA (${hoa.join(', ')})` : 'to you'}
+        {!test && hoa.length > 0 && me ? `, copying you (${me})` : test && me ? ` (${me})` : ''}.
+        <br />
+        <span className="muted" style={{ fontSize: '0.85rem' }}>
+          {test
+            ? "Test mode: the board isn't emailed about letters that aren't really mailed."
+            : hoa.length
+              ? 'For reference only; the mailed letter is the formal delivery.'
+              : 'No HOA email is set in Admin settings, so only you get a copy.'}
+        </span>
+      </span>
+    </label>
   )
 }

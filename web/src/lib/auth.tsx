@@ -85,6 +85,7 @@ export type Association = {
   street: string
   city_state_zip: string
   email: string
+  board_email: string
 }
 
 export const DEFAULT_ASSOCIATION: Association = {
@@ -94,6 +95,7 @@ export const DEFAULT_ASSOCIATION: Association = {
   street: '4730 Woodman Ave., #200',
   city_state_zip: 'Sherman Oaks, CA 91423',
   email: '',
+  board_email: '',
 }
 
 export function useAssociation(): Association {

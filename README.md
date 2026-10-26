@@ -154,6 +154,19 @@ Flooring/architectural requests can't go first-class (CC&R §7.3 requires certif
 
 How tracking moves the deadline: on sending, the deadline is estimated from Lob's expected delivery date; USPS's "Mailed" scan re-estimates it from the real mailing date; a certified "Delivered" scan records the HOA's receipt date and sets the exact deadline. First-class mail never gets a delivery scan, so its "Processed for delivery" scan becomes the estimated receipt date.
 
+### 7. Email copies of letters (Resend)
+
+When an owner mails a letter (with **Mail it for me** or by marking it sent), the site can also email the PDF to the HOA with the owner copied, as a courtesy copy. It's on by default, and owners can untick it for each letter. The HOA addresses are the manager and board emails in **Admin → Where letters go**. Replies go to the owner. While the Lob key is a test key, only the owner gets the copy; the board is never emailed about a letter that wasn't mailed.
+
+1. Create a free account at [resend.com](https://resend.com) and add the domain `428hillstreet.com`. Add the DNS records Resend shows (in Squarespace → Domains → DNS), then wait for it to say **Verified**.
+2. Create an API key with sending access and set it, plus the sender:
+
+   ```bash
+   npx supabase secrets set RESEND_API_KEY=re_xxx MAIL_FROM="428 Hill Street Owners <letters@428hillstreet.com>"
+   ```
+
+3. Deploy the functions: `npx supabase functions deploy send-letter email-letter`.
+
 ## Running it locally
 
 Requires Docker.

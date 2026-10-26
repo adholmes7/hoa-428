@@ -7,11 +7,13 @@
 //   MAIL_MONTHLY_LIMIT  optional: letters per unit per calendar month, default 4
 //   LOB_API_BASE        optional, for local testing against a fake server
 //
-// POST { status: true }                      -> { enabled, test, limit, used, price_note }
-// POST { request_id, pdf_base64, return_address, service } -> sends the letter
+// POST { status: true }                      -> { enabled, test, limit, used, price_note, email: { enabled, hoa } }
+// POST { request_id, pdf_base64, return_address, service, email_copy } -> sends the letter
+//   email_copy (default true): also email the PDF to the HOA with the owner copied (see _shared/email.ts)
 //   service: "first_class" | "certified" | "certified_rr"
 
 import { addCalendarDays, computeDeadline, requestType, todayISO } from "../_shared/deadlines.ts";
+import { emailEnabled, hoaRecipients, sendLetterCopy } from "../_shared/email.ts";
 import { adminClient, cors, json, requireOwner } from "../_shared/http.ts";
 
 type Addr = {
@@ -95,7 +97,9 @@ Deno.serve(async (req) => {
     }
     if (body.status) {
       const { data: setting } = await sb.from("site_settings").select("value").eq("key", "mail_service").maybeSingle();
+      const { data: assoc } = await sb.from("site_settings").select("value").eq("key", "association").maybeSingle();
       return json({
+        email: { enabled: emailEnabled(), hoa: hoaRecipients(assoc?.value ?? {}), owner: profile.contact_email || user.email || null },
         enabled: Boolean(key),
         test: Boolean(key?.startsWith("test_")),
         limit,
@@ -229,7 +233,23 @@ Deno.serve(async (req) => {
         .join("; "),
       created_by: user.id,
     });
-    return json({ ok: true, id: out.id, tracking_number: out.tracking_number ?? null, test, expected_delivery_date: expected });
+    let email: Awaited<ReturnType<typeof sendLetterCopy>> | null = null;
+    if (body.email_copy !== false && emailEnabled()) {
+      email = await sendLetterCopy({
+        sb: admin,
+        requestId: r.id,
+        refNo: r.ref_no,
+        subject: r.title,
+        ownerName: profile.display_name,
+        ownerEmail: profile.contact_email || user.email || null,
+        hoa: hoaRecipients(setting?.value ?? {}),
+        pdf,
+        howSent: `${service.label} via USPS, mailing ${sentDate}${out.tracking_number ? ` (tracking ${out.tracking_number})` : ""}`,
+        test,
+        actorId: user.id,
+      });
+    }
+    return json({ ok: true, id: out.id, tracking_number: out.tracking_number ?? null, test, expected_delivery_date: expected, email });
   } catch (e) {
     console.error(e);
     return json({ error: "Something went wrong" }, 500);
